@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -30,7 +30,14 @@ from neuro_os.models import (
     TaskStatus,
     User,
 )
-from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine, ProtocolExecutionError
+from neuro_os.protocols import (
+    DEFAULT_PROTOCOLS,
+    InvalidIdempotencyKeyError,
+    ProtocolEngine,
+    ProtocolExecutionError,
+    ProtocolRunInProgressError,
+    daily_idempotency_key,
+)
 from neuro_os.scheduler import create_default_energy_profile
 from neuro_os.tools import get_tools_for_protocol
 from neuro_os.task_service import (
@@ -170,6 +177,7 @@ class CommsTemplateCreate(BaseModel):
 
 class MorningPlanResponse(BaseModel):
     run_id: UUID
+    idempotency_key: str
     blocks: list[dict]
     tasks_created: int
 
@@ -246,7 +254,13 @@ app = FastAPI(
 
 @app.exception_handler(ProtocolExecutionError)
 async def handle_protocol_error(_request: Request, error: ProtocolExecutionError) -> JSONResponse:
-    return JSONResponse(status_code=502, content={"detail": str(error)})
+    if isinstance(error, ProtocolRunInProgressError):
+        status_code = 409
+    elif isinstance(error, InvalidIdempotencyKeyError):
+        status_code = 400
+    else:
+        status_code = 502
+    return JSONResponse(status_code=status_code, content={"detail": str(error)})
 
 
 @app.exception_handler(TaskServiceError)
@@ -462,6 +476,9 @@ async def delete_task(
 @app.post("/protocols/run", response_model=dict)
 async def run_protocol(
     request: ProtocolRunRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=255
+    ),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     memory: MemoryManager = Depends(get_memory_manager),
@@ -482,12 +499,28 @@ async def run_protocol(
         )
 
     engine = ProtocolEngine(session, memory, agent_factory)
-    run = await engine.run_protocol(request.protocol_type, current_user.id, request.initial_context)
+    effective_key = idempotency_key
+    if effective_key is None and request.protocol_type in {
+        ProtocolType.MORNING,
+        ProtocolType.WEEKLY_REVIEW,
+        ProtocolType.ADMIN_BATCH,
+    }:
+        effective_key = daily_idempotency_key(
+            request.protocol_type,
+            current_user.timezone,
+        )
+    run = await engine.run_protocol(
+        request.protocol_type,
+        current_user.id,
+        request.initial_context,
+        idempotency_key=effective_key,
+    )
 
     return {
         "run_id": str(run.id),
         "protocol_type": request.protocol_type.value,
         "status": run.status,
+        "idempotency_key": run.idempotency_key,
         "tasks_created": run.tasks_created,
         "tasks_completed": run.tasks_completed,
         "started_at": run.started_at,
@@ -519,6 +552,9 @@ async def list_protocols(
 # Morning plan endpoint (specialized)
 @app.post("/morning/plan", response_model=MorningPlanResponse)
 async def generate_morning_plan(
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=255
+    ),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     memory: MemoryManager = Depends(get_memory_manager),
@@ -530,7 +566,15 @@ async def generate_morning_plan(
         )
 
     engine = ProtocolEngine(session, memory, agent_factory)
-    run = await engine.run_protocol(ProtocolType.MORNING, current_user.id)
+    effective_key = idempotency_key or daily_idempotency_key(
+        ProtocolType.MORNING,
+        current_user.timezone,
+    )
+    run = await engine.run_protocol(
+        ProtocolType.MORNING,
+        current_user.id,
+        idempotency_key=effective_key,
+    )
 
     # Get created tasks
     result = await session.execute(
@@ -548,7 +592,12 @@ async def generate_morning_plan(
         for t in tasks
     ]
 
-    return {"run_id": run.id, "blocks": blocks, "tasks_created": run.tasks_created}
+    return {
+        "run_id": run.id,
+        "idempotency_key": run.idempotency_key,
+        "blocks": blocks,
+        "tasks_created": run.tasks_created,
+    }
 
 
 # Admin endpoints

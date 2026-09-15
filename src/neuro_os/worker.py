@@ -16,7 +16,7 @@ from neuro_os.config import settings
 from neuro_os.database import AsyncSessionLocal
 from neuro_os.memory import MemoryManager
 from neuro_os.models import AdminItem, ProtocolType, User
-from neuro_os.protocols import ProtocolEngine
+from neuro_os.protocols import ProtocolEngine, daily_idempotency_key
 from neuro_os.tools import get_tools_for_protocol
 
 
@@ -159,7 +159,11 @@ class NeuroWorker:
                 )
 
             engine = ProtocolEngine(session, memory, agent_factory)
-            await engine.run_protocol(ptype, user_id)
+            user = await session.get(User, user_id)
+            if user is None:
+                return
+            idempotency_key = daily_idempotency_key(ptype, user.timezone)
+            await engine.run_protocol(ptype, user_id, idempotency_key=idempotency_key)
 
 
 async def main():

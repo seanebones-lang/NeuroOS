@@ -85,6 +85,10 @@ neuro-os serve  # Runs on http://127.0.0.1:8000 outside Docker
 # Docs at http://127.0.0.1:8011/docs when using Docker Compose
 ```
 
+Morning plans use a user-timezone daily idempotency key. Retrying the same request returns the
+original run and its tasks. Send a distinct `Idempotency-Key` header only when intentionally
+requesting another run.
+
 ## Energy Model
 
 Three levels drive everything:

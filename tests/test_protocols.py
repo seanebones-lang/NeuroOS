@@ -1,19 +1,27 @@
 """Tests for trustworthy protocol execution."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 
-from neuro_os.models import ProtocolRun, ProtocolType, Task, User
-from neuro_os.protocols import ProtocolEngine, ProtocolExecutionError
+from neuro_os.models import Protocol, ProtocolRun, ProtocolType, Task, User
+from neuro_os.protocols import (
+    ProtocolEngine,
+    ProtocolExecutionError,
+    ProtocolRunInProgressError,
+    daily_idempotency_key,
+)
 
 
 class StepAgent:
     def __init__(self, invalid_blocks: bool = False) -> None:
         self.invalid_blocks = invalid_blocks
+        self.calls = 0
 
     async def run(self, prompt: str, context) -> str:
+        self.calls += 1
         if "Step: gather_inputs" in prompt:
             return json.dumps({"open_tasks": [], "calendar_events": []})
         if "Step: assess_energy" in prompt:
@@ -111,6 +119,76 @@ async def test_each_morning_run_returns_only_its_own_tasks(session):
     assert len(second_tasks) == 3
     assert {task.id for task in first_tasks}.isdisjoint(task.id for task in second_tasks)
     assert all(task.protocol_id == first_run.protocol_id for task in first_tasks + second_tasks)
+
+
+@pytest.mark.asyncio
+async def test_idempotent_morning_retry_returns_original_run_without_duplicate_tasks(session):
+    user = await _create_user(session)
+    agent = StepAgent()
+    engine = ProtocolEngine(session, None, lambda protocol_type: agent)
+
+    first_run = await engine.run_protocol(
+        ProtocolType.MORNING,
+        user.id,
+        idempotency_key="daily:morning:2026-09-15",
+    )
+    replayed_run = await engine.run_protocol(
+        ProtocolType.MORNING,
+        user.id,
+        idempotency_key="daily:morning:2026-09-15",
+    )
+
+    runs = (await session.execute(select(ProtocolRun))).scalars().all()
+    tasks = (await session.execute(select(Task))).scalars().all()
+    assert replayed_run.id == first_run.id
+    assert replayed_run.idempotency_key == "daily:morning:2026-09-15"
+    assert len(runs) == 1
+    assert len(tasks) == 3
+    assert agent.calls == 4
+
+
+def test_daily_idempotency_key_uses_the_users_local_date():
+    instant = datetime(2026, 9, 16, 1, 0, tzinfo=UTC)
+
+    assert daily_idempotency_key(ProtocolType.MORNING, "America/Chicago", instant) == (
+        "daily:morning:2026-09-15"
+    )
+    assert daily_idempotency_key(ProtocolType.MORNING, "Europe/London", instant) == (
+        "daily:morning:2026-09-16"
+    )
+
+
+@pytest.mark.asyncio
+async def test_idempotent_request_conflicts_while_original_run_is_active(session):
+    user = await _create_user(session)
+    protocol = Protocol(
+        user_id=user.id,
+        name="Morning Protocol",
+        type=ProtocolType.MORNING,
+        definition={},
+        is_default=True,
+    )
+    session.add(protocol)
+    await session.flush()
+    active_run = ProtocolRun(
+        user_id=user.id,
+        protocol_id=protocol.id,
+        idempotency_key="active-run",
+        status="running",
+    )
+    session.add(active_run)
+    await session.commit()
+
+    agent = StepAgent()
+    engine = ProtocolEngine(session, None, lambda protocol_type: agent)
+
+    with pytest.raises(ProtocolRunInProgressError, match="already in progress"):
+        await engine.run_protocol(
+            ProtocolType.MORNING,
+            user.id,
+            idempotency_key="active-run",
+        )
+    assert agent.calls == 0
 
 
 @pytest.mark.asyncio

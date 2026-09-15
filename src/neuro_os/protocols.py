@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from neuro_os.agent import Agent, AgentContext
 from neuro_os.memory import MemoryManager
@@ -238,6 +242,31 @@ class ProtocolExecutionError(RuntimeError):
     """Raised when a protocol cannot produce a trustworthy result."""
 
 
+class ProtocolRunInProgressError(ProtocolExecutionError):
+    """Raised when the same idempotent run is already executing."""
+
+
+class InvalidIdempotencyKeyError(ProtocolExecutionError):
+    """Raised when an idempotency key cannot be stored safely."""
+
+
+MAX_IDEMPOTENCY_KEY_LENGTH = 255
+
+
+def daily_idempotency_key(
+    protocol_type: ProtocolType,
+    timezone_name: str,
+    now: datetime | None = None,
+) -> str:
+    """Build the shared daily key used by scheduled and interactive entry points."""
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ProtocolExecutionError(f"Unknown user timezone: {timezone_name}") from exc
+    current = now.astimezone(timezone) if now is not None else datetime.now(timezone)
+    return f"daily:{protocol_type.value}:{current.date().isoformat()}"
+
+
 class ProtocolEngine:
     """Executes protocols with agent integration."""
 
@@ -256,15 +285,31 @@ class ProtocolEngine:
         protocol_type: ProtocolType,
         user_id: UUID,
         initial_context: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> ProtocolRun:
         protocol = await self._get_or_create_default_protocol(user_id, protocol_type)
+        protocol_id = protocol.id
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if normalized_key is not None:
+            existing = await self._get_idempotent_run(user_id, protocol_id, normalized_key)
+            if existing is not None:
+                return self._resolve_idempotent_run(existing)
+
         run = ProtocolRun(
             user_id=user_id,
-            protocol_id=protocol.id,
+            protocol_id=protocol_id,
+            idempotency_key=normalized_key,
             status="running",
         )
         self.session.add(run)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            existing = await self._get_idempotent_run(user_id, protocol_id, normalized_key)
+            if existing is None:
+                raise ProtocolExecutionError("Could not create protocol run") from exc
+            return self._resolve_idempotent_run(existing)
         run_id = run.id
         await self.session.commit()
 
@@ -273,7 +318,7 @@ class ProtocolEngine:
         context = AgentContext(
             user_id=user_id,
             session_id=run.id,
-            protocol_id=protocol.id,
+            protocol_id=protocol_id,
         )
 
         working_memory = {}
@@ -293,7 +338,7 @@ class ProtocolEngine:
             if protocol_type == ProtocolType.MORNING:
                 blocks = self._validate_morning_blocks(working_memory.get("blocks"))
                 tasks_created = await self._create_tasks_from_blocks(
-                    user_id, protocol.id, run.id, blocks
+                    user_id, protocol_id, run.id, blocks
                 )
                 run.tasks_created = tasks_created
                 run.notes = f"Created {tasks_created} tasks for today"
@@ -335,6 +380,48 @@ class ProtocolEngine:
             if isinstance(exc, ProtocolExecutionError):
                 raise
             raise ProtocolExecutionError(f"{definition.name} failed: {exc}") from exc
+
+    @staticmethod
+    def _normalize_idempotency_key(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise InvalidIdempotencyKeyError("Idempotency key cannot be blank")
+        if len(normalized) > MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise InvalidIdempotencyKeyError(
+                f"Idempotency key cannot exceed {MAX_IDEMPOTENCY_KEY_LENGTH} characters"
+            )
+        return normalized
+
+    async def _get_idempotent_run(
+        self,
+        user_id: UUID,
+        protocol_id: UUID,
+        idempotency_key: str | None,
+    ) -> ProtocolRun | None:
+        if idempotency_key is None:
+            return None
+        return await self.session.scalar(
+            select(ProtocolRun).where(
+                ProtocolRun.user_id == user_id,
+                ProtocolRun.protocol_id == protocol_id,
+                ProtocolRun.idempotency_key == idempotency_key,
+            )
+        )
+
+    @staticmethod
+    def _resolve_idempotent_run(run: ProtocolRun) -> ProtocolRun:
+        if run.status == "completed":
+            return run
+        if run.status == "running":
+            raise ProtocolRunInProgressError(
+                f"Protocol run {run.id} is already in progress for this idempotency key"
+            )
+        raise ProtocolExecutionError(
+            f"Protocol run {run.id} previously failed for this idempotency key: "
+            f"{run.notes or 'unknown error'}"
+        )
 
     @staticmethod
     def _parse_step_result(output_key: str, result: str) -> Any:

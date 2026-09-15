@@ -5,7 +5,7 @@ from enum import Enum as PyEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func, JSON
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -200,6 +200,7 @@ class ProtocolRun(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
     protocol_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("protocols.id"), index=True, nullable=False)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -212,3 +213,12 @@ class ProtocolRun(Base):
     user: Mapped["User"] = relationship()
     protocol: Mapped["Protocol"] = relationship()
     tasks: Mapped[list["Task"]] = relationship(back_populates="protocol_run")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "protocol_id",
+            "idempotency_key",
+            name="uq_protocol_runs_user_protocol_idempotency",
+        ),
+    )

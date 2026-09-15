@@ -16,7 +16,7 @@ from neuro_os.agent import Agent
 from neuro_os.config import settings
 from neuro_os.database import AsyncSessionLocal, init_db
 from neuro_os.models import EnergyLevel, ProtocolType, TaskStatus, User
-from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine
+from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine, daily_idempotency_key
 from neuro_os.scheduler import create_default_energy_profile
 from neuro_os.task_service import (
     PauseContext,
@@ -126,6 +126,9 @@ def register(
 def morning(
     email: str = typer.Option(..., prompt=True),
     password: str = typer.Option(..., prompt=True, hide_input=True),
+    idempotency_key: Optional[str] = typer.Option(
+        None, help="Stable retry key; defaults to the user's local date"
+    ),
 ):
     """Run morning protocol - plan the day."""
 
@@ -153,7 +156,15 @@ def morning(
                 )
 
             engine = ProtocolEngine(session, memory, agent_factory)
-            run = await engine.run_protocol(ProtocolType.MORNING, user.id)
+            effective_key = idempotency_key or daily_idempotency_key(
+                ProtocolType.MORNING,
+                user.timezone,
+            )
+            run = await engine.run_protocol(
+                ProtocolType.MORNING,
+                user.id,
+                idempotency_key=effective_key,
+            )
 
             # Display results
             from sqlalchemy import select
