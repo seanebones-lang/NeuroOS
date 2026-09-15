@@ -40,36 +40,37 @@ neuro-os/
 
 ```bash
 # 1. Clone and enter
-git clone <repo> neuro-os && cd neuro-os
+git clone https://github.com/seanebones-lang/NeuroOS.git neuro-os && cd neuro-os
 
 # 2. Configure
 cp .env.example .env
 # Edit .env with your API keys (OpenAI/Anthropic/Google)
 
-# 3. Start infrastructure
-docker compose up -d postgres redis
+# 3. Start the database, migration, API, and worker services
+docker compose up -d --build
 
-# 4. Run migrations
-alembic upgrade head
+# 4. Confirm the API is healthy
+curl http://127.0.0.1:8011/health
 
 # 5. Register user
-neuro-os register --email you@example.com
+docker compose exec api neuro-os register --email you@example.com
 
 # 6. Morning protocol (your 6am command)
-neuro-os morning --email you@example.com
+docker compose exec api neuro-os morning --email you@example.com
 
 # 7. During the day: interruption recovery
-neuro-os recover --email you@example.com
+docker compose exec api neuro-os recover --email you@example.com
 
 # 8. End of day
-neuro-os shutdown --email you@example.com
+docker compose exec api neuro-os shutdown --email you@example.com
 ```
 
 ## API Server
 
 ```bash
-neuro-os serve  # Runs on http://127.0.0.1:8000
-# Docs at http://127.0.0.1:8000/docs
+neuro-os serve  # Runs on http://127.0.0.1:8000 outside Docker
+# Docker Compose serves the API at http://127.0.0.1:8011
+# Docs at http://127.0.0.1:8011/docs when using Docker Compose
 ```
 
 ## Energy Model

@@ -1,27 +1,38 @@
 """FastAPI application for NeuroOS."""
 
 from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from neuro_os.agent import Agent
 from neuro_os.config import settings
-from neuro_os.database import init_db, close_db, get_session, engine
-from neuro_os.models import User, Task, Protocol, ProtocolType, TaskStatus, EnergyLevel, AdminItem, CommsTemplate
+from neuro_os.database import close_db, get_session
 from neuro_os.memory import MemoryManager
-from neuro_os.agent import Agent, AgentContext
-from neuro_os.protocols import ProtocolEngine, DEFAULT_PROTOCOLS
-from neuro_os.scheduler import EnergyAwareScheduler, create_default_energy_profile
-
+from neuro_os.models import (
+    AdminItem,
+    CommsTemplate,
+    EnergyLevel,
+    Protocol,
+    ProtocolType,
+    Task,
+    TaskStatus,
+    User,
+)
+from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine, ProtocolExecutionError
+from neuro_os.scheduler import create_default_energy_profile
+from neuro_os.tools import get_tools_for_protocol
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -133,7 +144,10 @@ class MorningPlanResponse(BaseModel):
 
 # Auth utilities
 def create_access_token(user_id: UUID) -> str:
-    payload = {"sub": str(user_id), "exp": datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)}
+    payload = {
+        "sub": str(user_id),
+        "exp": datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes),
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -169,6 +183,7 @@ async def get_redis():
     global _redis_client
     if _redis_client is None:
         import redis.asyncio as redis
+
         _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
     return _redis_client
 
@@ -184,7 +199,6 @@ async def get_memory_manager(
 # Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
     yield
     await close_db()
 
@@ -196,6 +210,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(ProtocolExecutionError)
+async def handle_protocol_error(_request: Request, error: ProtocolExecutionError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(error)})
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -216,6 +236,7 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
 
     # Create user
     from passlib.context import CryptContext
+
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     user = User(
         email=user_data.email,
@@ -228,6 +249,7 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
 
     # Create default energy profile
     from neuro_os.models import EnergyProfile
+
     energy_profile = EnergyProfile(
         user_id=user.id,
         weekly_pattern=create_default_energy_profile(user.timezone),
@@ -265,6 +287,7 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
 @app.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin, session: AsyncSession = Depends(get_session)):
     from passlib.context import CryptContext
+
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
     result = await session.execute(select(User).where(User.email == credentials.email))
@@ -312,7 +335,9 @@ async def list_tasks(
         query = query.where(Task.status == status)
     if energy_level:
         query = query.where(Task.energy_level == energy_level)
-    query = query.order_by(Task.sequence, Task.scheduled_start.nulls_last()).limit(limit).offset(offset)
+    query = (
+        query.order_by(Task.sequence, Task.scheduled_start.nulls_last()).limit(limit).offset(offset)
+    )
     result = await session.execute(query)
     return result.scalars().all()
 
@@ -394,7 +419,7 @@ async def run_protocol(
             ProtocolType.COMMS_DRAFT: "You are the Comms Drafter. Output draft message matching user's voice.",
         }
         return Agent(
-            tools=[],
+            tools=get_tools_for_protocol(ptype.value),
             system_prompt=prompts.get(ptype, "You are a helpful assistant."),
         )
 
@@ -442,7 +467,7 @@ async def generate_morning_plan(
 ):
     def agent_factory(ptype: ProtocolType) -> Agent:
         return Agent(
-            tools=[],
+            tools=get_tools_for_protocol(ptype.value),
             system_prompt="You are the Morning Protocol agent. Output JSON with blocks[title, energy_level, estimated_minutes, task_ids].",
         )
 
@@ -488,7 +513,8 @@ async def list_admin_items(
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
-        select(AdminItem).where(AdminItem.user_id == current_user.id, AdminItem.is_active == True)
+        select(AdminItem)
+        .where(AdminItem.user_id == current_user.id, AdminItem.is_active == True)
         .order_by(AdminItem.next_due)
     )
     items = result.scalars().all()

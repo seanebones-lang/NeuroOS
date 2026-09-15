@@ -2,19 +2,19 @@ import asyncio
 import sys
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-
 # Add src to path
 sys.path.insert(0, "src")
 
-from neuro_os.models import Base
 from neuro_os.config import settings
+from neuro_os.models import Base
 
 config = context.config
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

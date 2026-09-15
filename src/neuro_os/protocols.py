@@ -1,31 +1,35 @@
 """Protocol definitions and execution engine for NeuroOS."""
 
 from __future__ import annotations
+
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from neuro_os.agent import Agent, AgentContext
-from neuro_os.models import Protocol, ProtocolRun, ProtocolType, Task, TaskStatus, EnergyLevel
 from neuro_os.memory import MemoryManager
+from neuro_os.models import EnergyLevel, Protocol, ProtocolRun, ProtocolType, Task, TaskStatus
 
 
 @dataclass
 class ProtocolStep:
     """A single step in a protocol."""
+
     name: str
     description: str
     agent_prompt: str
     tool_names: list[str] = field(default_factory=list)
-    output_key: Optional[str] = None
+    output_key: str | None = None
     required: bool = True
 
 
 @dataclass
 class ProtocolDefinition:
     """Full protocol definition."""
+
     name: str
     type: ProtocolType
     description: str
@@ -36,27 +40,27 @@ class ProtocolDefinition:
 MORNING_PROTOCOL = ProtocolDefinition(
     name="Morning Protocol",
     type=ProtocolType.MORNING,
-    description="Plan the day: ingest calendar, inbox, open loops -> 3 sequenced energy-matched blocks",
+    description="Plan the day: ingest calendar, open tasks, energy profile -> 3 sequenced energy-matched blocks",
     steps=[
         ProtocolStep(
             name="gather_inputs",
-            description="Pull calendar events, unread emails, open tasks, admin due today",
-            agent_prompt="Gather all inputs for today's planning. Return JSON with calendar_events, unread_count, open_tasks, admin_due.",
-            tool_names=["get_calendar", "get_inbox", "get_open_tasks", "get_admin_due"],
+            description="Pull calendar events, open tasks, admin due today",
+            agent_prompt="Gather all inputs for today's planning. Return JSON with calendar_events, open_tasks, admin_due.",
+            tool_names=["get_calendar", "get_open_tasks"],
             output_key="inputs",
         ),
         ProtocolStep(
             name="assess_energy",
             description="Load user's energy profile for today",
-            agent_prompt="Load energy profile for today. Return energy_blocks.",
+            agent_prompt="Load energy profile for today. Return energy_blocks with time ranges and energy levels.",
             tool_names=["get_energy_profile"],
             output_key="energy",
         ),
         ProtocolStep(
             name="sequence_blocks",
             description="Create 3 sequenced work blocks matched to energy curve",
-            agent_prompt="Using inputs and energy profile, create exactly 3 work blocks (deep, shallow, admin/shallow). Each block: title, energy_level, estimated_minutes, task_ids. Return JSON blocks[].",
-            tool_names=["create_tasks"],
+            agent_prompt="Using inputs and energy profile, create exactly 3 work blocks (deep, shallow, recovery). Each block MUST include: title, energy_level (deep/shallow/recovery), estimated_minutes, scheduled_start (ISO format). Return JSON blocks[].",
+            tool_names=[],
             output_key="blocks",
         ),
         ProtocolStep(
@@ -105,14 +109,14 @@ SHUTDOWN_PROTOCOL = ProtocolDefinition(
         ProtocolStep(
             name="review_day",
             description="Review today's completed tasks and open loops",
-            agent_prompt="Summarize completed tasks, open loops, energy spent. Return JSON.",
+            agent_prompt="Summarize completed tasks, open loops, energy spent. Return JSON with completed[], open_loops[].",
             tool_names=["get_completed_today", "get_open_loops"],
             output_key="review",
         ),
         ProtocolStep(
             name="prep_tomorrow",
             description="Identify 3 items for tomorrow's morning protocol",
-            agent_prompt="From review + tomorrow's calendar, pick 3 items for tomorrow morning. Return JSON items[title, energy_level, reason].",
+            agent_prompt="From review + tomorrow's calendar, pick 3 items for tomorrow morning. Return JSON items[title, energy_level, reason]. energy_level must be deep/shallow/recovery.",
             tool_names=["get_tomorrow_calendar"],
             output_key="tomorrow_items",
         ),
@@ -134,7 +138,7 @@ WEEKLY_REVIEW_PROTOCOL = ProtocolDefinition(
         ProtocolStep(
             name="energy_audit",
             description="Analyze actual vs planned energy alignment",
-            agent_prompt="Compare last 7 days actual energy (from task completion times) vs profile. Return adjustments.",
+            agent_prompt="Compare last 7 days actual energy (from task completion times) vs profile. Return adjustments as day->time_block->energy_level overrides.",
             tool_names=["get_energy_actuals"],
             output_key="energy_adjustments",
         ),
@@ -142,7 +146,7 @@ WEEKLY_REVIEW_PROTOCOL = ProtocolDefinition(
             name="admin_batch",
             description="Batch all admin for the week",
             agent_prompt="List all admin items due this week. Group by category. Return batches.",
-            tool_names=["get_week_admin"],
+            tool_names=["get_due_admin"],
             output_key="admin_batches",
         ),
         ProtocolStep(
@@ -230,22 +234,8 @@ DEFAULT_PROTOCOLS = {
 }
 
 
-MOCK_MORNING_BLOCKS = [
-    {"title": "Deep Work: Core Project", "energy_level": "deep", "estimated_minutes": 120},
-    {"title": "Shallow Work: Emails & Admin", "energy_level": "shallow", "estimated_minutes": 60},
-    {"title": "Recovery & Planning", "energy_level": "recovery", "estimated_minutes": 30},
-]
-
-MOCK_RECOVERY_STEP = "Open the file you were editing, scroll to the function you were writing, and write the next line."
-
-MOCK_SHUTDOWN = {
-    "tomorrow_items": [
-        {"title": "Deep Work: Continue core project", "energy_level": "deep", "reason": "Left off at critical function"},
-        {"title": "Shallow Work: Client follow-ups", "energy_level": "shallow", "reason": "3 emails pending"},
-        {"title": "Admin: Invoice batch", "energy_level": "recovery", "reason": "Due Friday"},
-    ],
-    "personal_note": "Walked the dog at sunset - needed that."
-}
+class ProtocolExecutionError(RuntimeError):
+    """Raised when a protocol cannot produce a trustworthy result."""
 
 
 class ProtocolEngine:
@@ -265,7 +255,7 @@ class ProtocolEngine:
         self,
         protocol_type: ProtocolType,
         user_id: UUID,
-        initial_context: Optional[dict] = None,
+        initial_context: dict | None = None,
     ) -> ProtocolRun:
         protocol = await self._get_or_create_default_protocol(user_id, protocol_type)
         run = ProtocolRun(
@@ -275,9 +265,10 @@ class ProtocolEngine:
         )
         self.session.add(run)
         await self.session.flush()
+        run_id = run.id
+        await self.session.commit()
 
         definition = DEFAULT_PROTOCOLS[protocol_type]
-        agent = self.agent_factory(protocol_type)
 
         context = AgentContext(
             user_id=user_id,
@@ -289,60 +280,125 @@ class ProtocolEngine:
         if initial_context:
             working_memory.update(initial_context)
 
-        for step in definition.steps:
-            step_input = self._build_step_input(step, working_memory, context)
-            result = await agent.run(step_input, context)
-            if step.output_key:
-                working_memory[step.output_key] = result
+        try:
+            for step in definition.steps:
+                agent = self.agent_factory(protocol_type)
+                step_input = self._build_step_input(step, working_memory)
+                result = await agent.run(step_input, context)
+                if step.output_key:
+                    working_memory[step.output_key] = self._parse_step_result(
+                        step.output_key, result
+                    )
 
-        if protocol_type == ProtocolType.MORNING:
-            blocks = working_memory.get("blocks")
-            if isinstance(blocks, str):
-                try:
-                    blocks = json.loads(blocks)
-                except:
-                    blocks = MOCK_MORNING_BLOCKS
-            elif not blocks:
-                blocks = MOCK_MORNING_BLOCKS
-            tasks_created = await self._create_tasks_from_blocks(user_id, blocks)
-            run.tasks_created = tasks_created
-            run.notes = f"Created {tasks_created} tasks for today"
+            if protocol_type == ProtocolType.MORNING:
+                blocks = self._validate_morning_blocks(working_memory.get("blocks"))
+                tasks_created = await self._create_tasks_from_blocks(user_id, protocol.id, blocks)
+                run.tasks_created = tasks_created
+                run.notes = f"Created {tasks_created} tasks for today"
 
-        elif protocol_type == ProtocolType.INTERRUPTION_RECOVERY:
-            resume_step = working_memory.get("resume_step")
-            if isinstance(resume_step, str):
-                run.notes = resume_step
-            else:
-                run.notes = MOCK_RECOVERY_STEP
+            elif protocol_type == ProtocolType.INTERRUPTION_RECOVERY:
+                resume_step = working_memory.get("resume_step")
+                if not isinstance(resume_step, str) or not resume_step.strip():
+                    raise ProtocolExecutionError(
+                        "Interruption recovery did not produce a resume step"
+                    )
+                run.notes = resume_step.strip()
 
-        elif protocol_type == ProtocolType.SHUTDOWN:
-            tomorrow_items = working_memory.get("tomorrow_items")
-            personal_note = working_memory.get("personal_note")
-            if isinstance(tomorrow_items, str):
-                try:
-                    tomorrow_items = json.loads(tomorrow_items)
-                except:
-                    tomorrow_items = MOCK_SHUTDOWN["tomorrow_items"]
-            elif not tomorrow_items:
-                tomorrow_items = MOCK_SHUTDOWN["tomorrow_items"]
-            if not personal_note:
-                personal_note = MOCK_SHUTDOWN["personal_note"]
-            run.notes = f"Tomorrow: {len(tomorrow_items)} items. Personal: {personal_note}"
+            elif protocol_type == ProtocolType.SHUTDOWN:
+                tomorrow_items = working_memory.get("tomorrow_items")
+                if not isinstance(tomorrow_items, list):
+                    raise ProtocolExecutionError(
+                        "Shutdown did not produce a list of tomorrow items"
+                    )
+                personal_note = (initial_context or {}).get("personal_note")
+                note_suffix = (
+                    f" Personal: {personal_note.strip()}"
+                    if isinstance(personal_note, str) and personal_note.strip()
+                    else ""
+                )
+                run.notes = f"Tomorrow: {len(tomorrow_items)} items.{note_suffix}"
 
-        run.status = "completed"
-        run.completed_at = datetime.utcnow()
-        await self.session.commit()
+            run.status = "completed"
+            run.completed_at = datetime.now(UTC)
+            await self.session.commit()
+            return run
+        except Exception as exc:
+            await self.session.rollback()
+            failed_run = await self.session.get(ProtocolRun, run_id)
+            if failed_run is not None:
+                failed_run.status = "failed"
+                failed_run.completed_at = datetime.now(UTC)
+                failed_run.notes = str(exc)[:2000]
+                await self.session.commit()
+            if isinstance(exc, ProtocolExecutionError):
+                raise
+            raise ProtocolExecutionError(f"{definition.name} failed: {exc}") from exc
 
-        return run
+    @staticmethod
+    def _parse_step_result(output_key: str, result: str) -> Any:
+        if not isinstance(result, str) or not result.strip():
+            raise ProtocolExecutionError(f"Step '{output_key}' returned no usable result")
+        try:
+            parsed = json.loads(result)
+        except json.JSONDecodeError:
+            if output_key in {"resume_step", "plan", "personal_note", "final", "draft"}:
+                return result.strip()
+            raise ProtocolExecutionError(f"Step '{output_key}' returned invalid JSON") from None
 
-    def _build_step_input(self, step: ProtocolStep, working_memory: dict, context: AgentContext) -> str:
-        parts = [f"Step: {step.name}", f"Description: {step.description}", f"Prompt: {step.agent_prompt}"]
+        if isinstance(parsed, dict):
+            if output_key in parsed:
+                return parsed[output_key]
+            if output_key == "tomorrow_items" and "items" in parsed:
+                return parsed["items"]
+        return parsed
+
+    @staticmethod
+    def _validate_morning_blocks(blocks: Any) -> list[dict]:
+        if not isinstance(blocks, list) or len(blocks) != 3:
+            raise ProtocolExecutionError("Morning planning must produce exactly three work blocks")
+        validated = []
+        for index, block in enumerate(blocks, start=1):
+            if not isinstance(block, dict):
+                raise ProtocolExecutionError(f"Morning block {index} is not an object")
+            title = block.get("title")
+            energy_level = block.get("energy_level")
+            estimated_minutes = block.get("estimated_minutes")
+            if not isinstance(title, str) or not title.strip():
+                raise ProtocolExecutionError(f"Morning block {index} has no title")
+            try:
+                EnergyLevel(energy_level)
+            except (TypeError, ValueError):
+                raise ProtocolExecutionError(
+                    f"Morning block {index} has an invalid energy level"
+                ) from None
+            if (
+                not isinstance(estimated_minutes, int)
+                or isinstance(estimated_minutes, bool)
+                or not 5 <= estimated_minutes <= 480
+            ):
+                raise ProtocolExecutionError(f"Morning block {index} has an invalid duration")
+            validated.append(
+                {
+                    "title": title.strip(),
+                    "energy_level": energy_level,
+                    "estimated_minutes": estimated_minutes,
+                }
+            )
+        return validated
+
+    def _build_step_input(self, step: ProtocolStep, working_memory: dict) -> str:
+        parts = [
+            f"Step: {step.name}",
+            f"Description: {step.description}",
+            f"Prompt: {step.agent_prompt}",
+        ]
         if working_memory:
             parts.append(f"Working memory: {json.dumps(working_memory, default=str)}")
         return "\n\n".join(parts)
 
     async def _get_or_create_default_protocol(self, user_id: UUID, ptype: ProtocolType) -> Protocol:
         from sqlalchemy import select
+
         result = await self.session.execute(
             select(Protocol).where(
                 Protocol.user_id == user_id,
@@ -376,18 +432,24 @@ class ProtocolEngine:
             await self.session.flush()
         return protocol
 
-    async def _create_tasks_from_blocks(self, user_id: UUID, blocks: list[dict]) -> int:
+    async def _create_tasks_from_blocks(
+        self, user_id: UUID, protocol_id: UUID, blocks: list[dict]
+    ) -> int:
         count = 0
         for i, block in enumerate(blocks):
             if not isinstance(block, dict):
                 continue
             task = Task(
                 user_id=user_id,
-                title=block.get("title", f"Block {i+1}"),
+                protocol_id=protocol_id,
+                title=block.get("title", f"Block {i + 1}"),
                 energy_level=EnergyLevel(block.get("energy_level", "shallow")),
                 estimated_minutes=block.get("estimated_minutes", 60),
                 sequence=i,
                 status=TaskStatus.OPEN,
+                scheduled_start=datetime.fromisoformat(block["scheduled_start"])
+                if block.get("scheduled_start")
+                else None,
             )
             self.session.add(task)
             count += 1

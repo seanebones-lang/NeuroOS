@@ -1,6 +1,7 @@
 """Background worker for NeuroOS - handles scheduled protocols, admin, reminders."""
 
 from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -9,14 +10,14 @@ import redis.asyncio as redis
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from neuro_os.agent import Agent
 from neuro_os.config import settings
-from neuro_os.database import AsyncSessionLocal, init_db
-from neuro_os.models import User, AdminItem, ProtocolType
+from neuro_os.database import AsyncSessionLocal
 from neuro_os.memory import MemoryManager
-from neuro_os.protocols import ProtocolEngine, DEFAULT_PROTOCOLS
-from neuro_os.agent import Agent, AgentContext
+from neuro_os.models import AdminItem, ProtocolType, User
+from neuro_os.protocols import ProtocolEngine
+from neuro_os.tools import get_tools_for_protocol
 
 
 class NeuroWorker:
@@ -28,7 +29,6 @@ class NeuroWorker:
 
     async def start(self):
         """Start the worker."""
-        await init_db()
         self.redis_client = redis.from_url(settings.redis_url, decode_responses=True)
 
         # Schedule jobs
@@ -53,10 +53,10 @@ class NeuroWorker:
             name="Morning protocol for all users",
         )
 
-        # Admin batch check every hour
+        # Prepare due admin drafts once each morning. Completion remains a user action.
         self.scheduler.add_job(
             self._process_due_admin,
-            CronTrigger(minute=0),
+            CronTrigger(hour=8, minute=0),
             id="admin_batch",
             name="Process due admin items",
         )
@@ -112,13 +112,6 @@ class NeuroWorker:
                     due_items = admin_result.scalars().all()
 
                     if due_items:
-                        # Update next_due for each
-                        for item in due_items:
-                            item.next_due = self._calculate_next_due(item)
-                            item.last_completed = datetime.utcnow()
-                        await session.commit()
-
-                        # Run admin batch protocol
                         await self._run_user_protocol(user.id, ProtocolType.ADMIN_BATCH)
 
                 except Exception as e:
@@ -160,7 +153,10 @@ class NeuroWorker:
                     ProtocolType.ADMIN_BATCH: "You are the Admin Batch agent. Output drafts for each admin item.",
                     ProtocolType.COMMS_DRAFT: "You are the Comms Drafter. Output draft message matching user's voice.",
                 }
-                return Agent(tools=[], system_prompt=prompts.get(pt, ""))
+                return Agent(
+                    tools=get_tools_for_protocol(pt.value),
+                    system_prompt=prompts.get(pt, ""),
+                )
 
             engine = ProtocolEngine(session, memory, agent_factory)
             await engine.run_protocol(ptype, user_id)

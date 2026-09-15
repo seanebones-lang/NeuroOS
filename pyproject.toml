@@ -5,6 +5,7 @@ description = "External executive function for neurodivergent builders and shop 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiosqlite>=0.22",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.10",
@@ -25,6 +26,7 @@ dependencies = [
     "python-multipart>=0.0.18",
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
+    "bcrypt>=4.0.1,<4.1",
     "email-validator>=2.2",
     "typer>=0.15",
     "rich>=13.9",
@@ -45,9 +47,14 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4", "PTH", "SIM", "T20", "TID", "TRY", "ARG", "ERA", "PD", "PL", "RET"]
 ignore = ["S101", "TRY003"]
-src = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -63,6 +70,9 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[project.scripts]
+neuro-os = "neuro_os.cli:app"
 
 [build-system]
 requires = ["setuptools>=75", "wheel"]

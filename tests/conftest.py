@@ -4,11 +4,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import StaticPool
 
 from neuro_os.models import Base
-from neuro_os.config import settings
-
 
 # Use in-memory SQLite for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -20,7 +18,7 @@ async def engine():
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
-        poolclass=NullPool,
+        poolclass=StaticPool,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
