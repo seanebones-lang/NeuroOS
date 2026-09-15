@@ -161,7 +161,7 @@ def morning(
             from neuro_os.models import Task
 
             result = await session.execute(
-                select(Task).where(Task.protocol_id == run.protocol_id, Task.user_id == user.id)
+                select(Task).where(Task.protocol_run_id == run.id, Task.user_id == user.id)
             )
             tasks = result.scalars().all()
 

@@ -95,8 +95,9 @@ The scheduler learns your actual patterns and adjusts.
 ## Data Model
 
 - **User** → EnergyProfile (weekly pattern + overrides)
-- **Task** → energy_level, sequence, depends_on, durable user-authored recovery context
-- **Protocol** → definition (steps + AI prompts), runs tracked
+- **Task** → energy_level, sequence, depends_on, durable recovery context, creating run
+- **Protocol** → definition (steps + AI prompts)
+- **ProtocolRun** → status, timing, notes, and the exact tasks created by that execution
 - **AdminItem** → recurring (invoicing, tax, licenses) with templates
 - **CommsTemplate** → channel + recipient_type + voice instructions
 

@@ -77,6 +77,9 @@ class Task(Base):
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
     parent_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("tasks.id"), index=True, nullable=True)
     protocol_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("protocols.id"), index=True, nullable=True)
+    protocol_run_id: Mapped[Optional[UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("protocol_runs.id"), index=True, nullable=True
+    )
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -103,6 +106,7 @@ class Task(Base):
     user: Mapped["User"] = relationship(back_populates="tasks")
     parent: Mapped[Optional["Task"]] = relationship(remote_side=[id], backref="subtasks")
     protocol: Mapped[Optional["Protocol"]] = relationship(back_populates="tasks")
+    protocol_run: Mapped[Optional["ProtocolRun"]] = relationship(back_populates="tasks")
 
     __table_args__ = (
         Index("ix_tasks_user_status", "user_id", "status"),
@@ -207,3 +211,4 @@ class ProtocolRun(Base):
 
     user: Mapped["User"] = relationship()
     protocol: Mapped["Protocol"] = relationship()
+    tasks: Mapped[list["Task"]] = relationship(back_populates="protocol_run")

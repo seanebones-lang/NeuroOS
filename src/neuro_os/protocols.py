@@ -292,7 +292,9 @@ class ProtocolEngine:
 
             if protocol_type == ProtocolType.MORNING:
                 blocks = self._validate_morning_blocks(working_memory.get("blocks"))
-                tasks_created = await self._create_tasks_from_blocks(user_id, protocol.id, blocks)
+                tasks_created = await self._create_tasks_from_blocks(
+                    user_id, protocol.id, run.id, blocks
+                )
                 run.tasks_created = tasks_created
                 run.notes = f"Created {tasks_created} tasks for today"
 
@@ -433,7 +435,11 @@ class ProtocolEngine:
         return protocol
 
     async def _create_tasks_from_blocks(
-        self, user_id: UUID, protocol_id: UUID, blocks: list[dict]
+        self,
+        user_id: UUID,
+        protocol_id: UUID,
+        protocol_run_id: UUID,
+        blocks: list[dict],
     ) -> int:
         count = 0
         for i, block in enumerate(blocks):
@@ -442,6 +448,7 @@ class ProtocolEngine:
             task = Task(
                 user_id=user_id,
                 protocol_id=protocol_id,
+                protocol_run_id=protocol_run_id,
                 title=block.get("title", f"Block {i + 1}"),
                 energy_level=EnergyLevel(block.get("energy_level", "shallow")),
                 estimated_minutes=block.get("estimated_minutes", 60),

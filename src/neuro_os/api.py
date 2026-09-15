@@ -125,6 +125,7 @@ class TaskResponse(BaseModel):
     user_id: UUID
     parent_id: Optional[UUID]
     protocol_id: Optional[UUID]
+    protocol_run_id: Optional[UUID]
     title: str
     description: Optional[str]
     status: TaskStatus
@@ -171,6 +172,7 @@ class CommsTemplateCreate(BaseModel):
 
 
 class MorningPlanResponse(BaseModel):
+    run_id: UUID
     blocks: list[dict]
     tasks_created: int
 
@@ -561,7 +563,7 @@ async def generate_morning_plan(
 
     # Get created tasks
     result = await session.execute(
-        select(Task).where(Task.protocol_id == run.protocol_id, Task.user_id == current_user.id)
+        select(Task).where(Task.protocol_run_id == run.id, Task.user_id == current_user.id)
     )
     tasks = result.scalars().all()
 
@@ -575,7 +577,7 @@ async def generate_morning_plan(
         for t in tasks
     ]
 
-    return {"blocks": blocks, "tasks_created": run.tasks_created}
+    return {"run_id": run.id, "blocks": blocks, "tasks_created": run.tasks_created}
 
 
 # Admin endpoints

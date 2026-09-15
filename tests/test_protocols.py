@@ -76,6 +76,41 @@ async def test_morning_protocol_persists_three_validated_tasks(session):
         "Close open loops",
     ]
     assert all(task.protocol_id == run.protocol_id for task in tasks)
+    assert all(task.protocol_run_id == run.id for task in tasks)
+
+
+@pytest.mark.asyncio
+async def test_each_morning_run_returns_only_its_own_tasks(session):
+    user = await _create_user(session)
+    agent = StepAgent()
+    engine = ProtocolEngine(session, None, lambda protocol_type: agent)
+
+    first_run = await engine.run_protocol(ProtocolType.MORNING, user.id)
+    second_run = await engine.run_protocol(ProtocolType.MORNING, user.id)
+
+    first_tasks = (
+        (
+            await session.execute(
+                select(Task).where(Task.protocol_run_id == first_run.id).order_by(Task.sequence)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    second_tasks = (
+        (
+            await session.execute(
+                select(Task).where(Task.protocol_run_id == second_run.id).order_by(Task.sequence)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert len(first_tasks) == 3
+    assert len(second_tasks) == 3
+    assert {task.id for task in first_tasks}.isdisjoint(task.id for task in second_tasks)
+    assert all(task.protocol_id == first_run.protocol_id for task in first_tasks + second_tasks)
 
 
 @pytest.mark.asyncio
