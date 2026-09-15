@@ -33,15 +33,23 @@ from neuro_os.models import (
 from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine, ProtocolExecutionError
 from neuro_os.scheduler import create_default_energy_profile
 from neuro_os.tools import get_tools_for_protocol
-from neuro_os.task_context import (
+from neuro_os.task_service import (
     InvalidTaskTransitionError,
+    InvalidTaskReferenceError,
+    InvalidTaskScheduleError,
     MissingRecoveryContextError,
     PauseContext,
-    TaskContextError,
+    TaskCreateData,
+    TaskHasDependentsError,
     TaskNotFoundError,
+    TaskServiceError,
+    TaskUpdateData,
+    create_task as create_task_service,
+    delete_task as delete_task_service,
     load_resume_context,
     pause_task,
     start_task,
+    update_task as update_task_service,
 )
 
 # Security
@@ -78,23 +86,12 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
-class TaskCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    energy_level: EnergyLevel = EnergyLevel.SHALLOW
-    estimated_minutes: Optional[int] = None
-    parent_id: Optional[UUID] = None
-    protocol_id: Optional[UUID] = None
+class TaskCreate(TaskCreateData):
+    """API request for validated task creation."""
 
 
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[TaskStatus] = None
-    energy_level: Optional[EnergyLevel] = None
-    estimated_minutes: Optional[int] = None
-    scheduled_start: Optional[datetime] = None
-    scheduled_end: Optional[datetime] = None
+class TaskUpdate(TaskUpdateData):
+    """API request for a validated task update."""
 
 
 class TaskStartRequest(BaseModel):
@@ -252,12 +249,17 @@ async def handle_protocol_error(_request: Request, error: ProtocolExecutionError
     return JSONResponse(status_code=502, content={"detail": str(error)})
 
 
-@app.exception_handler(TaskContextError)
-async def handle_task_context_error(_request: Request, error: TaskContextError) -> JSONResponse:
+@app.exception_handler(TaskServiceError)
+async def handle_task_service_error(_request: Request, error: TaskServiceError) -> JSONResponse:
     if isinstance(error, TaskNotFoundError):
         status_code = 404
-    elif isinstance(error, (InvalidTaskTransitionError, MissingRecoveryContextError)):
+    elif isinstance(
+        error,
+        (InvalidTaskTransitionError, MissingRecoveryContextError, TaskHasDependentsError),
+    ):
         status_code = 409
+    elif isinstance(error, (InvalidTaskReferenceError, InvalidTaskScheduleError)):
+        status_code = 400
     else:
         status_code = 400
     return JSONResponse(status_code=status_code, content={"detail": str(error)})
@@ -357,14 +359,7 @@ async def create_task(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    task = Task(
-        user_id=current_user.id,
-        **task_data.model_dump(),
-    )
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
-    return task
+    return await create_task_service(session, current_user.id, task_data)
 
 
 @app.get("/tasks", response_model=list[TaskResponse])
@@ -410,24 +405,7 @@ async def update_task(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        select(Task).where(Task.id == task_id, Task.user_id == current_user.id)
-    )
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    for field, value in task_data.model_dump(exclude_unset=True).items():
-        setattr(task, field, value)
-
-    if task_data.status == TaskStatus.IN_PROGRESS and not task.started_at:
-        task.started_at = datetime.utcnow()
-    elif task_data.status == TaskStatus.DONE and not task.completed_at:
-        task.completed_at = datetime.utcnow()
-
-    await session.commit()
-    await session.refresh(task)
-    return task
+    return await update_task_service(session, current_user.id, task_id, task_data)
 
 
 @app.post("/tasks/{task_id}/start", response_model=TaskContextResponse)
@@ -477,14 +455,7 @@ async def delete_task(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        select(Task).where(Task.id == task_id, Task.user_id == current_user.id)
-    )
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    await session.delete(task)
-    await session.commit()
+    await delete_task_service(session, current_user.id, task_id)
 
 
 # Protocol endpoints

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from neuro_os.models import EnergyLevel, Task, TaskStatus, User
-from neuro_os.task_context import (
+from neuro_os.task_service import (
     InvalidTaskTransitionError,
     MissingRecoveryContextError,
     PauseContext,

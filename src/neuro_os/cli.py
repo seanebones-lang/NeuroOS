@@ -18,9 +18,9 @@ from neuro_os.database import AsyncSessionLocal, init_db
 from neuro_os.models import EnergyLevel, ProtocolType, TaskStatus, User
 from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine
 from neuro_os.scheduler import create_default_energy_profile
-from neuro_os.task_context import (
+from neuro_os.task_service import (
     PauseContext,
-    TaskContextError,
+    TaskServiceError,
     load_resume_context,
     pause_task,
     start_task,
@@ -206,7 +206,7 @@ def start(
         try:
             async with AsyncSessionLocal() as session:
                 task = await start_task(session, user.id, task_id, next_action)
-        except TaskContextError as exc:
+        except TaskServiceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
@@ -257,7 +257,7 @@ def pause(
             )
             async with AsyncSessionLocal() as session:
                 task = await pause_task(session, user.id, task_id, context)
-        except (TaskContextError, ValueError) as exc:
+        except (TaskServiceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
@@ -307,7 +307,7 @@ def recover(
 
             try:
                 context = await load_resume_context(session, user.id, task.id)
-            except TaskContextError as exc:
+            except TaskServiceError as exc:
                 console.print(f"[red]{exc}[/red]")
                 raise typer.Exit(1) from exc
 

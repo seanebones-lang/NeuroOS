@@ -29,6 +29,7 @@ neuro-os/
 │   ├── memory.py          # Working + long-term (Redis) memory
 │   ├── scheduler.py       # Energy-aware scheduling
 │   ├── protocols.py       # Protocol definitions + engine
+│   ├── task_service.py     # Task ownership, lifecycle, and recovery rules
 │   ├── api.py             # FastAPI REST + auth
 │   └── cli.py             # Typer CLI for daily use
 ├── alembic/               # Migrations
