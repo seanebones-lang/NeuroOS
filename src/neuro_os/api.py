@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,16 @@ from neuro_os.models import (
 from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine, ProtocolExecutionError
 from neuro_os.scheduler import create_default_energy_profile
 from neuro_os.tools import get_tools_for_protocol
+from neuro_os.task_context import (
+    InvalidTaskTransitionError,
+    MissingRecoveryContextError,
+    PauseContext,
+    TaskContextError,
+    TaskNotFoundError,
+    load_resume_context,
+    pause_task,
+    start_task,
+)
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -85,6 +95,29 @@ class TaskUpdate(BaseModel):
     estimated_minutes: Optional[int] = None
     scheduled_start: Optional[datetime] = None
     scheduled_end: Optional[datetime] = None
+
+
+class TaskStartRequest(BaseModel):
+    next_action: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class TaskContextResponse(BaseModel):
+    task_id: UUID
+    status: TaskStatus
+    interruption_count: int
+    context_snapshot: dict
+
+
+class ResumeContextResponse(BaseModel):
+    task_id: UUID
+    title: str
+    status: TaskStatus
+    resume_step: str
+    working_notes: str | None
+    location: dict
+    resources: list[str]
+    paused_at: str | None
+    source: str
 
 
 class TaskResponse(BaseModel):
@@ -215,6 +248,17 @@ app = FastAPI(
 @app.exception_handler(ProtocolExecutionError)
 async def handle_protocol_error(_request: Request, error: ProtocolExecutionError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(error)})
+
+
+@app.exception_handler(TaskContextError)
+async def handle_task_context_error(_request: Request, error: TaskContextError) -> JSONResponse:
+    if isinstance(error, TaskNotFoundError):
+        status_code = 404
+    elif isinstance(error, (InvalidTaskTransitionError, MissingRecoveryContextError)):
+        status_code = 409
+    else:
+        status_code = 400
+    return JSONResponse(status_code=status_code, content={"detail": str(error)})
 
 
 app.add_middleware(
@@ -382,6 +426,47 @@ async def update_task(
     await session.commit()
     await session.refresh(task)
     return task
+
+
+@app.post("/tasks/{task_id}/start", response_model=TaskContextResponse)
+async def start_task_endpoint(
+    task_id: UUID,
+    request: TaskStartRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    task = await start_task(session, current_user.id, task_id, request.next_action)
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "interruption_count": task.interruption_count,
+        "context_snapshot": task.context_snapshot,
+    }
+
+
+@app.post("/tasks/{task_id}/pause", response_model=TaskContextResponse)
+async def pause_task_endpoint(
+    task_id: UUID,
+    context: PauseContext,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    task = await pause_task(session, current_user.id, task_id, context)
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "interruption_count": task.interruption_count,
+        "context_snapshot": task.context_snapshot,
+    }
+
+
+@app.get("/tasks/{task_id}/resume", response_model=ResumeContextResponse)
+async def resume_task_endpoint(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    return await load_resume_context(session, current_user.id, task_id)
 
 
 @app.delete("/tasks/{task_id}", status_code=204)

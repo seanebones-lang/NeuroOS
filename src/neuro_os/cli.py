@@ -18,6 +18,13 @@ from neuro_os.database import AsyncSessionLocal, init_db
 from neuro_os.models import EnergyLevel, ProtocolType, TaskStatus, User
 from neuro_os.protocols import DEFAULT_PROTOCOLS, ProtocolEngine
 from neuro_os.scheduler import create_default_energy_profile
+from neuro_os.task_context import (
+    PauseContext,
+    TaskContextError,
+    load_resume_context,
+    pause_task,
+    start_task,
+)
 from neuro_os.tools import get_tools_for_protocol
 
 app = typer.Typer(name="neuro-os", help="External executive function for neurodivergent builders")
@@ -180,14 +187,96 @@ def morning(
 
 
 @app.command()
+def start(
+    task_id: UUID = typer.Argument(..., help="Task ID to start"),
+    email: str = typer.Option(..., prompt=True),
+    password: str = typer.Option(..., prompt=True, hide_input=True),
+    next_action: Optional[str] = typer.Option(
+        None, help="Exact first action to save for later recovery"
+    ),
+):
+    """Start work on a task and optionally save its first action."""
+
+    async def _start():
+        user = await get_user_by_email(email)
+        if not user or not get_pwd_context().verify(password, user.hashed_password):
+            console.print("[red]Invalid credentials[/red]")
+            raise typer.Exit(1)
+
+        try:
+            async with AsyncSessionLocal() as session:
+                task = await start_task(session, user.id, task_id, next_action)
+        except TaskContextError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        console.print(Panel(f"[bold]Started: {task.title}[/bold]", style="green"))
+        if next_action:
+            console.print(
+                f"[green]Saved next action:[/green] {task.context_snapshot['next_action']}"
+            )
+
+    asyncio.run(_start())
+
+
+@app.command()
+def pause(
+    task_id: UUID = typer.Argument(..., help="In-progress task ID to pause"),
+    email: str = typer.Option(..., prompt=True),
+    password: str = typer.Option(..., prompt=True, hide_input=True),
+    next_action: str = typer.Option(..., prompt=True, help="Exact action to resume with"),
+    working_notes: Optional[str] = typer.Option(
+        None, help="Optional notes about the current state"
+    ),
+    file: Optional[str] = typer.Option(None, help="Optional file or workspace location"),
+    line: Optional[int] = typer.Option(None, min=1, help="Optional one-based line number"),
+    resource: Optional[list[str]] = typer.Option(
+        None, "--resource", "-r", help="Relevant resource; repeat for multiple values"
+    ),
+):
+    """Pause an active task with exact, durable recovery context."""
+
+    async def _pause():
+        user = await get_user_by_email(email)
+        if not user or not get_pwd_context().verify(password, user.hashed_password):
+            console.print("[red]Invalid credentials[/red]")
+            raise typer.Exit(1)
+
+        location = {}
+        if file:
+            location["file"] = file
+        if line:
+            location["line"] = line
+
+        try:
+            context = PauseContext(
+                next_action=next_action,
+                working_notes=working_notes,
+                location=location,
+                resources=resource or [],
+            )
+            async with AsyncSessionLocal() as session:
+                task = await pause_task(session, user.id, task_id, context)
+        except (TaskContextError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        console.print(Panel(f"[bold]Paused: {task.title}[/bold]", style="yellow"))
+        console.print(f"[green]Saved resume step:[/green] {task.context_snapshot['next_action']}")
+        console.print(f"Interruptions recorded: {task.interruption_count}")
+
+    asyncio.run(_pause())
+
+
+@app.command()
 def recover(
     email: str = typer.Option(..., prompt=True),
     password: str = typer.Option(..., prompt=True, hide_input=True),
-    task_id: Optional[str] = typer.Option(
+    task_id: Optional[UUID] = typer.Option(
         None, help="Task ID to recover (defaults to most recent in_progress)"
     ),
 ):
-    """Run interruption recovery protocol."""
+    """Recover the exact context saved when a task was paused."""
 
     async def _recover():
         user = await get_user_by_email(email)
@@ -196,21 +285,13 @@ def recover(
             raise typer.Exit(1)
 
         async with AsyncSessionLocal() as session:
-            import redis.asyncio as redis
-
-            from neuro_os.memory import MemoryManager
-
-            redis_client = redis.from_url(settings.redis_url, decode_responses=True)
-            memory = MemoryManager(session, redis_client)
-
-            # Find interrupted task
             from sqlalchemy import select
 
             from neuro_os.models import Task
 
             if task_id:
                 result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == user.id)
+                    select(Task).where(Task.id == task_id, Task.user_id == user.id)
                 )
             else:
                 result = await session.execute(
@@ -224,19 +305,23 @@ def recover(
                 console.print("[yellow]No interrupted task found[/yellow]")
                 return
 
-            context = {"interrupted_task_id": str(task.id)}
-
-            def agent_factory(ptype):
-                return Agent(
-                    tools=get_tools_for_protocol(ptype.value),
-                    system_prompt="You are the Interruption Recovery agent. Output one sentence: exact next micro-step.",
-                )
-
-            engine = ProtocolEngine(session, memory, agent_factory)
-            run = await engine.run_protocol(ProtocolType.INTERRUPTION_RECOVERY, user.id, context)
+            try:
+                context = await load_resume_context(session, user.id, task.id)
+            except TaskContextError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
 
             console.print(Panel(f"[bold]Recovery for: {task.title}[/bold]", style="yellow"))
-            console.print(f"[green]Resume step:[/green] {run.notes or 'Check working memory'}")
+            console.print(f"[green]Resume step:[/green] {context['resume_step']}")
+            if context["working_notes"]:
+                console.print(f"[green]Working notes:[/green] {context['working_notes']}")
+            if context["location"]:
+                console.print(f"[green]Location:[/green] {context['location']}")
+            if context["resources"]:
+                console.print("[green]Resources:[/green]")
+                for item in context["resources"]:
+                    console.print(f"  • {item}")
+            console.print("[dim]Source: saved user context[/dim]")
 
     asyncio.run(_recover())
 

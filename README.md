@@ -58,10 +58,19 @@ docker compose exec api neuro-os register --email you@example.com
 # 6. Morning protocol (your 6am command)
 docker compose exec api neuro-os morning --email you@example.com
 
-# 7. During the day: interruption recovery
-docker compose exec api neuro-os recover --email you@example.com
+# 7. Start a task, then save exact context before switching away
+docker compose exec api neuro-os start TASK_UUID --email you@example.com \
+  --next-action "Open the implementation and add the validation branch"
+docker compose exec api neuro-os pause TASK_UUID --email you@example.com \
+  --next-action "Add the invalid-input test" \
+  --working-notes "The happy path passes" \
+  --file tests/test_feature.py --line 42 \
+  --resource docs/design.md
 
-# 8. End of day
+# 8. Recover the saved action exactly, even after an API restart
+docker compose exec api neuro-os recover --email you@example.com --task-id TASK_UUID
+
+# 9. End of day
 docker compose exec api neuro-os shutdown --email you@example.com
 ```
 
@@ -86,7 +95,7 @@ The scheduler learns your actual patterns and adjusts.
 ## Data Model
 
 - **User** → EnergyProfile (weekly pattern + overrides)
-- **Task** → energy_level, sequence, depends_on, context_snapshot (for recovery)
+- **Task** → energy_level, sequence, depends_on, durable user-authored recovery context
 - **Protocol** → definition (steps + AI prompts), runs tracked
 - **AdminItem** → recurring (invoicing, tax, licenses) with templates
 - **CommsTemplate** → channel + recipient_type + voice instructions
