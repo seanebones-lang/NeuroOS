@@ -2,6 +2,8 @@
 
 **External executive function for neurodivergent builders and shop owners.**
 
+See [ROADMAP.md](ROADMAP.md) for the current engineering priorities and release gates.
+
 Not an ADHD planner. Not a wellness app. An operating system that takes the work your brain is bad at (sequencing, working memory, energy management, translating social/business language, follow-through after interruption, invisible admin) and makes the work your brain is good at possible.
 
 ## Core Protocols
