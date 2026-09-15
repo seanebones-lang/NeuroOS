@@ -90,6 +90,7 @@ class Agent:
     ):
         self.tools = {t.name: t for t in tools}
         self.system_prompt = system_prompt
+        self.provider = "openai"
         self.model = model or settings.default_model
         self.max_iterations = max_iterations
         self._tool_schemas = [self._tool_to_schema(t) for t in tools]

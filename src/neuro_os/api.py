@@ -25,6 +25,8 @@ from neuro_os.models import (
     CommsTemplate,
     EnergyLevel,
     Protocol,
+    ProtocolRun,
+    ProtocolStepRun,
     ProtocolType,
     Task,
     TaskStatus,
@@ -151,6 +153,37 @@ class TaskResponse(BaseModel):
 class ProtocolRunRequest(BaseModel):
     protocol_type: ProtocolType
     initial_context: Optional[dict] = None
+
+
+class ProtocolStepRunResponse(BaseModel):
+    step_index: int
+    step_name: str
+    status: str
+    provider: str | None
+    model: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    duration_ms: int | None
+    tool_activity: list[dict]
+    output_summary: dict
+    error_category: str | None
+    error_message: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class ProtocolRunDetailResponse(BaseModel):
+    run_id: UUID
+    protocol_id: UUID
+    status: str
+    idempotency_key: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    tasks_created: int
+    notes: str | None
+    steps: list[ProtocolStepRunResponse]
+    tasks: list[dict]
 
 
 class AdminItemCreate(BaseModel):
@@ -547,6 +580,65 @@ async def list_protocols(
         }
         for p in protocols
     ]
+
+
+@app.get("/protocols/runs/{run_id}", response_model=ProtocolRunDetailResponse)
+async def get_protocol_run(
+    run_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    run = await session.scalar(
+        select(ProtocolRun).where(
+            ProtocolRun.id == run_id,
+            ProtocolRun.user_id == current_user.id,
+        )
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Protocol run not found")
+
+    steps = (
+        (
+            await session.execute(
+                select(ProtocolStepRun)
+                .where(ProtocolStepRun.protocol_run_id == run.id)
+                .order_by(ProtocolStepRun.step_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    tasks = (
+        (
+            await session.execute(
+                select(Task)
+                .where(Task.protocol_run_id == run.id, Task.user_id == current_user.id)
+                .order_by(Task.sequence)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "run_id": run.id,
+        "protocol_id": run.protocol_id,
+        "status": run.status,
+        "idempotency_key": run.idempotency_key,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "tasks_created": run.tasks_created,
+        "notes": run.notes,
+        "steps": steps,
+        "tasks": [
+            {
+                "task_id": str(task.id),
+                "title": task.title,
+                "status": task.status.value,
+                "sequence": task.sequence,
+            }
+            for task in tasks
+        ],
+    }
 
 
 # Morning plan endpoint (specialized)

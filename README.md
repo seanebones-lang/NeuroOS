@@ -89,6 +89,10 @@ Morning plans use a user-timezone daily idempotency key. Retrying the same reque
 original run and its tasks. Send a distinct `Idempotency-Key` header only when intentionally
 requesting another run.
 
+Inspect an authenticated execution at `GET /protocols/runs/{run_id}`. The response includes ordered
+step status, provider and model identity, duration, bounded tool activity, errors, and linked tasks.
+Raw prompts, model output, tool arguments, and tool results are not stored in the trace.
+
 ## Energy Model
 
 Three levels drive everything:

@@ -4,9 +4,10 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from neuro_os.models import Protocol, ProtocolRun, ProtocolType, Task, User
+from neuro_os.agent import Agent, AgentContext, BaseTool, ToolCall, ToolResult
+from neuro_os.models import Protocol, ProtocolRun, ProtocolStepRun, ProtocolType, Task, User
 from neuro_os.protocols import (
     ProtocolEngine,
     ProtocolExecutionError,
@@ -55,6 +56,55 @@ class StepAgent:
         raise AssertionError(f"Unexpected prompt: {prompt}")
 
 
+class TraceEchoTool(BaseTool):
+    name = "trace_echo"
+    description = "Return a fixed trace result"
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, arguments: dict, context: AgentContext) -> ToolResult:
+        return ToolResult(tool_call_id="", name=self.name, result={"ok": True})
+
+
+class ToolUsingStepAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__([TraceEchoTool()], "test", model="trace-model", max_iterations=2)
+        self.requests = 0
+
+    async def _call_llm(self, messages: list[dict], context: AgentContext) -> dict:
+        self.requests += 1
+        if self.requests == 1:
+            return {
+                "content": None,
+                "tool_calls": [ToolCall(name="trace_echo", arguments={}, id="trace-call")],
+            }
+        prompt = messages[1]["content"]
+        if "Step: gather_inputs" in prompt:
+            content = '{"open_tasks":[],"calendar_events":[]}'
+        elif "Step: assess_energy" in prompt:
+            content = '{"energy_blocks":[]}'
+        elif "Step: sequence_blocks" in prompt:
+            content = json.dumps(
+                {
+                    "blocks": [
+                        {"title": "One", "energy_level": "deep", "estimated_minutes": 30},
+                        {
+                            "title": "Two",
+                            "energy_level": "shallow",
+                            "estimated_minutes": 30,
+                        },
+                        {
+                            "title": "Three",
+                            "energy_level": "recovery",
+                            "estimated_minutes": 30,
+                        },
+                    ]
+                }
+            )
+        else:
+            content = "Ready"
+        return {"content": content, "tool_calls": []}
+
+
 async def _create_user(session) -> User:
     user = User(email="protocol@example.com", hashed_password="test")
     session.add(user)
@@ -85,6 +135,55 @@ async def test_morning_protocol_persists_three_validated_tasks(session):
     ]
     assert all(task.protocol_id == run.protocol_id for task in tasks)
     assert all(task.protocol_run_id == run.id for task in tasks)
+    steps = (
+        (
+            await session.execute(
+                select(ProtocolStepRun)
+                .where(ProtocolStepRun.protocol_run_id == run.id)
+                .order_by(ProtocolStepRun.step_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [step.step_name for step in steps] == [
+        "gather_inputs",
+        "assess_energy",
+        "sequence_blocks",
+        "present_plan",
+    ]
+    assert all(step.status == "completed" for step in steps)
+    assert all(step.duration_ms is not None for step in steps)
+    assert steps[2].output_summary["parsed_type"] == "list"
+    assert steps[2].output_summary["characters"] > 0
+
+
+@pytest.mark.asyncio
+async def test_protocol_trace_records_bounded_tool_activity(session):
+    user = await _create_user(session)
+    engine = ProtocolEngine(session, None, lambda protocol_type: ToolUsingStepAgent())
+
+    run = await engine.run_protocol(ProtocolType.MORNING, user.id)
+
+    steps = (
+        (
+            await session.execute(
+                select(ProtocolStepRun)
+                .where(ProtocolStepRun.protocol_run_id == run.id)
+                .order_by(ProtocolStepRun.step_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(steps) == 4
+    assert all(step.provider == "openai" for step in steps)
+    assert all(step.model == "trace-model" for step in steps)
+    assert all(
+        step.tool_activity
+        == [{"tool_call_id": "trace-call", "name": "trace_echo", "status": "completed"}]
+        for step in steps
+    )
 
 
 @pytest.mark.asyncio
@@ -145,6 +244,12 @@ async def test_idempotent_morning_retry_returns_original_run_without_duplicate_t
     assert len(runs) == 1
     assert len(tasks) == 3
     assert agent.calls == 4
+    step_count = await session.scalar(
+        select(func.count())
+        .select_from(ProtocolStepRun)
+        .where(ProtocolStepRun.protocol_run_id == first_run.id)
+    )
+    assert step_count == 4
 
 
 def test_daily_idempotency_key_uses_the_users_local_date():
@@ -202,7 +307,16 @@ async def test_invalid_morning_output_records_failure_without_fabricated_tasks(s
 
     runs = (await session.execute(select(ProtocolRun))).scalars().all()
     tasks = (await session.execute(select(Task))).scalars().all()
+    steps = (
+        (await session.execute(select(ProtocolStepRun).order_by(ProtocolStepRun.step_index)))
+        .scalars()
+        .all()
+    )
     assert len(runs) == 1
     assert runs[0].status == "failed"
     assert "invalid JSON" in runs[0].notes
     assert tasks == []
+    assert [step.status for step in steps] == ["completed", "completed", "failed"]
+    assert steps[-1].step_name == "sequence_blocks"
+    assert steps[-1].error_category == "ProtocolExecutionError"
+    assert "invalid JSON" in steps[-1].error_message

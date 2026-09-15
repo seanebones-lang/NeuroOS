@@ -213,6 +213,11 @@ class ProtocolRun(Base):
     user: Mapped["User"] = relationship()
     protocol: Mapped["Protocol"] = relationship()
     tasks: Mapped[list["Task"]] = relationship(back_populates="protocol_run")
+    steps: Mapped[list["ProtocolStepRun"]] = relationship(
+        back_populates="protocol_run",
+        cascade="all, delete-orphan",
+        order_by="ProtocolStepRun.step_index",
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -220,5 +225,36 @@ class ProtocolRun(Base):
             "protocol_id",
             "idempotency_key",
             name="uq_protocol_runs_user_protocol_idempotency",
+        ),
+    )
+
+
+class ProtocolStepRun(Base):
+    __tablename__ = "protocol_step_runs"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    protocol_run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("protocol_runs.id"), index=True, nullable=False
+    )
+    step_index: Mapped[int] = mapped_column(nullable=False)
+    step_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="running", nullable=False)
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    tool_activity: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    output_summary: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    protocol_run: Mapped["ProtocolRun"] = relationship(back_populates="steps")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "protocol_run_id",
+            "step_index",
+            name="uq_protocol_step_runs_run_index",
         ),
     )

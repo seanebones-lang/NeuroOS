@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -13,9 +14,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from neuro_os.agent import Agent, AgentContext
+from neuro_os.agent import Agent, AgentContext, ToolCall, ToolResult
 from neuro_os.memory import MemoryManager
-from neuro_os.models import EnergyLevel, Protocol, ProtocolRun, ProtocolType, Task, TaskStatus
+from neuro_os.models import (
+    EnergyLevel,
+    Protocol,
+    ProtocolRun,
+    ProtocolStepRun,
+    ProtocolType,
+    Task,
+    TaskStatus,
+)
 
 
 @dataclass
@@ -326,14 +335,19 @@ class ProtocolEngine:
             working_memory.update(initial_context)
 
         try:
-            for step in definition.steps:
+            for step_index, step in enumerate(definition.steps):
                 agent = self.agent_factory(protocol_type)
                 step_input = self._build_step_input(step, working_memory)
-                result = await agent.run(step_input, context)
+                parsed_result = await self._execute_step(
+                    run.id,
+                    step_index,
+                    step,
+                    agent,
+                    step_input,
+                    context,
+                )
                 if step.output_key:
-                    working_memory[step.output_key] = self._parse_step_result(
-                        step.output_key, result
-                    )
+                    working_memory[step.output_key] = parsed_result
 
             if protocol_type == ProtocolType.MORNING:
                 blocks = self._validate_morning_blocks(working_memory.get("blocks"))
@@ -380,6 +394,88 @@ class ProtocolEngine:
             if isinstance(exc, ProtocolExecutionError):
                 raise
             raise ProtocolExecutionError(f"{definition.name} failed: {exc}") from exc
+
+    async def _execute_step(
+        self,
+        run_id: UUID,
+        step_index: int,
+        step: ProtocolStep,
+        agent: Agent,
+        step_input: str,
+        context: AgentContext,
+    ) -> Any:
+        tool_activity: list[dict[str, Any]] = []
+        step_run = ProtocolStepRun(
+            protocol_run_id=run_id,
+            step_index=step_index,
+            step_name=step.name,
+            status="running",
+            provider=getattr(agent, "provider", "unknown"),
+            model=getattr(agent, "model", None),
+            tool_activity=[],
+            output_summary={},
+        )
+        self.session.add(step_run)
+        await self.session.flush()
+        step_run_id = step_run.id
+        await self.session.commit()
+        started = time.perf_counter()
+
+        def on_tool_call(tool_call: ToolCall) -> None:
+            tool_activity.append(
+                {
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "status": "called",
+                }
+            )
+
+        def on_tool_result(tool_result: ToolResult) -> None:
+            for activity in reversed(tool_activity):
+                if activity["tool_call_id"] == tool_result.tool_call_id:
+                    activity["status"] = "failed" if tool_result.error else "completed"
+                    if tool_result.error:
+                        activity["error"] = tool_result.error[:500]
+                    return
+
+        try:
+            if isinstance(agent, Agent):
+                result = await agent.run(
+                    step_input,
+                    context,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                )
+            else:
+                result = await agent.run(step_input, context)
+            parsed_result = (
+                self._parse_step_result(step.output_key, result) if step.output_key else result
+            )
+        except Exception as exc:
+            await self.session.rollback()
+            failed_step = await self.session.get(ProtocolStepRun, step_run_id)
+            if failed_step is not None:
+                failed_step.status = "failed"
+                failed_step.completed_at = datetime.now(UTC)
+                failed_step.duration_ms = round((time.perf_counter() - started) * 1000)
+                failed_step.tool_activity = tool_activity
+                failed_step.error_category = type(exc).__name__
+                failed_step.error_message = str(exc)[:2000]
+                await self.session.commit()
+            raise
+
+        completed_step = await self.session.get(ProtocolStepRun, step_run_id)
+        if completed_step is not None:
+            completed_step.status = "completed"
+            completed_step.completed_at = datetime.now(UTC)
+            completed_step.duration_ms = round((time.perf_counter() - started) * 1000)
+            completed_step.tool_activity = tool_activity
+            completed_step.output_summary = {
+                "characters": len(result),
+                "parsed_type": type(parsed_result).__name__,
+            }
+            await self.session.commit()
+        return parsed_result
 
     @staticmethod
     def _normalize_idempotency_key(value: str | None) -> str | None:
