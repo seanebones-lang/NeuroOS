@@ -51,7 +51,7 @@ Not done yet:
 - Local login token (CLI still prompts email + password)
 - Calendar / inbox provider adapters
 - Hosted UI
-- Rate limiting and abuse controls
+- Hosted deployment and operational monitoring
 
 ---
 
@@ -122,6 +122,11 @@ SECRET_KEY=replace-with-a-unique-secret-at-least-32-characters-long
 CORS_ORIGINS=https://app.example.com,https://admin.example.com
 OPENAI_API_KEY=replace-with-a-provider-key
 ```
+
+Redis limits registration and login by client IP within a 15-minute window, and limits authenticated
+protocol execution per user within an hour. Each limit is configurable with the `*_RATE_LIMIT`
+variables in `.env.example`; a storage outage returns `503` so expensive endpoints are never silently
+unprotected.
 
 ---
 

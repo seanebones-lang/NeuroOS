@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
     cors_origins: str = ""
+    registration_rate_limit: int = Field(default=5, ge=1)
+    login_rate_limit: int = Field(default=10, ge=1)
+    auth_rate_limit_window_seconds: int = Field(default=900, ge=1)
+    protocol_rate_limit: int = Field(default=20, ge=1)
+    protocol_rate_limit_window_seconds: int = Field(default=3600, ge=1)
 
     # Database
     database_url: str = Field(

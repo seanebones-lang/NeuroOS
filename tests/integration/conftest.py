@@ -18,9 +18,31 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from neuro_os import api as api_module
 from neuro_os.api import app, get_memory_manager
 from neuro_os.database import get_session
 from neuro_os.models import Base
+
+
+class InMemoryRedis:
+    """Minimal limiter state for deterministic API integration tests."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, int] = {}
+        self.expirations: dict[str, int] = {}
+
+    async def incr(self, key: str) -> int:
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
+
+    async def ttl(self, key: str) -> int:
+        return self.expirations.get(key, -1)
+
+    async def expire(self, key: str, seconds: int) -> None:
+        self.expirations[key] = seconds
+
+    async def aclose(self) -> None:
+        return None
 
 
 def _integration_database_url() -> str:
@@ -76,10 +98,14 @@ async def api_client(integration_engine: AsyncEngine) -> AsyncIterator[httpx.Asy
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_memory_manager] = override_memory_manager
+    api_module._redis_client = InMemoryRedis()
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
-    app.dependency_overrides.clear()
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
+    finally:
+        api_module._redis_client = None
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture

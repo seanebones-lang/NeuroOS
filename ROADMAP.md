@@ -22,6 +22,8 @@ The repository now has a working foundation:
   lifecycle conflicts, and concurrent protocol idempotency through the API.
 - Production configuration rejects weak signing keys, debug mode, missing provider credentials, and
   wildcard or non-HTTPS CORS origins before services start.
+- Redis-backed limits protect registration, login, and authenticated protocol execution, failing
+  closed with a retryable response if the limiter cannot reach Redis.
 - Authenticated task writes enforce ownership, schedules, lifecycle transitions, and dependent
   deletion rules through one service.
 - The API, CLI, and worker use the same protocol and task-context services.
@@ -112,6 +114,6 @@ Goal: make releases repeatable and reversible.
 
 ## Immediate next slice
 
-Add authenticated rate limiting and abuse controls for login, registration, and protocol execution.
-Keep limits observable and configurable per deployment so a single user cannot exhaust model calls
-or password-hash capacity.
+Add a deployment runbook with health checks, backup/restore drills, log retention, alert thresholds,
+and a clear incident path. The aim is an operator who can prove the system is recoverable before
+real personal workflow data accumulates.

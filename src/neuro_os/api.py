@@ -40,6 +40,12 @@ from neuro_os.protocols import (
     ProtocolRunInProgressError,
     daily_idempotency_key,
 )
+from neuro_os.rate_limit import (
+    RateLimitExceededError,
+    RateLimitPolicy,
+    RateLimitUnavailableError,
+    enforce_rate_limit,
+)
 from neuro_os.scheduler import create_default_energy_profile
 from neuro_os.tools import get_tools_for_protocol
 from neuro_os.task_service import (
@@ -312,6 +318,22 @@ async def handle_task_service_error(_request: Request, error: TaskServiceError) 
     return JSONResponse(status_code=status_code, content={"detail": str(error)})
 
 
+@app.exception_handler(RateLimitExceededError)
+async def handle_rate_limit_error(_request: Request, error: RateLimitExceededError) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": str(error)},
+        headers={"Retry-After": str(error.retry_after_seconds)},
+    )
+
+
+@app.exception_handler(RateLimitUnavailableError)
+async def handle_rate_limit_unavailable(
+    _request: Request, error: RateLimitUnavailableError
+) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"detail": str(error)})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -321,9 +343,28 @@ app.add_middleware(
 )
 
 
+def _client_identifier(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
+
+
+async def enforce_request_limit(request: Request, scope: str, identifier: str, policy: RateLimitPolicy) -> None:
+    redis_client = await get_redis()
+    await enforce_rate_limit(redis_client, f"rate-limit:{scope}:{identifier}", policy)
+
+
 # Auth endpoints
 @app.post("/auth/register", response_model=UserResponse, status_code=201)
-async def register(user_data: UserCreate, session: AsyncSession = Depends(get_session)):
+async def register(
+    user_data: UserCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    await enforce_request_limit(
+        request,
+        "register",
+        _client_identifier(request),
+        RateLimitPolicy(settings.registration_rate_limit, settings.auth_rate_limit_window_seconds),
+    )
     # Check existing
     result = await session.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
@@ -380,7 +421,17 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
 
 
 @app.post("/auth/login", response_model=Token)
-async def login(credentials: UserLogin, session: AsyncSession = Depends(get_session)):
+async def login(
+    credentials: UserLogin,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    await enforce_request_limit(
+        request,
+        "login",
+        _client_identifier(request),
+        RateLimitPolicy(settings.login_rate_limit, settings.auth_rate_limit_window_seconds),
+    )
     from passlib.context import CryptContext
 
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -509,6 +560,7 @@ async def delete_task(
 @app.post("/protocols/run", response_model=dict)
 async def run_protocol(
     request: ProtocolRunRequest,
+    http_request: Request,
     idempotency_key: str | None = Header(
         default=None, alias="Idempotency-Key", min_length=1, max_length=255
     ),
@@ -516,6 +568,12 @@ async def run_protocol(
     session: AsyncSession = Depends(get_session),
     memory: MemoryManager = Depends(get_memory_manager),
 ):
+    await enforce_request_limit(
+        http_request,
+        "protocol",
+        str(current_user.id),
+        RateLimitPolicy(settings.protocol_rate_limit, settings.protocol_rate_limit_window_seconds),
+    )
     # Create a simple agent factory for protocol types
     def agent_factory(ptype: ProtocolType) -> Agent:
         prompts = {
@@ -644,6 +702,7 @@ async def get_protocol_run(
 # Morning plan endpoint (specialized)
 @app.post("/morning/plan", response_model=MorningPlanResponse)
 async def generate_morning_plan(
+    request: Request,
     idempotency_key: str | None = Header(
         default=None, alias="Idempotency-Key", min_length=1, max_length=255
     ),
@@ -651,6 +710,12 @@ async def generate_morning_plan(
     session: AsyncSession = Depends(get_session),
     memory: MemoryManager = Depends(get_memory_manager),
 ):
+    await enforce_request_limit(
+        request,
+        "protocol",
+        str(current_user.id),
+        RateLimitPolicy(settings.protocol_rate_limit, settings.protocol_rate_limit_window_seconds),
+    )
     def agent_factory(ptype: ProtocolType) -> Agent:
         return Agent(
             tools=get_tools_for_protocol(ptype.value),
