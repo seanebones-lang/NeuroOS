@@ -84,7 +84,7 @@ MORNING_PROTOCOL = ProtocolDefinition(
         ProtocolStep(
             name="sequence_blocks",
             description="Create 3 sequenced work blocks matched to energy curve",
-            agent_prompt="Using inputs, energy profile, and stated capacity when available, create exactly 3 work blocks (deep, shallow, recovery). Keep the plan within the user's stated capacity. Each block MUST include: title, energy_level (deep/shallow/recovery), estimated_minutes, scheduled_start (ISO format). Return JSON blocks[].",
+            agent_prompt="Using inputs, energy profile, and stated capacity when available, create exactly 3 work blocks. When stated_capacity is recovery, every block must be recovery. When it is shallow, blocks may only be shallow or recovery. When it is deep or absent, blocks may use deep, shallow, or recovery. Each block MUST include: title, energy_level (deep/shallow/recovery), estimated_minutes, scheduled_start (ISO format). Return JSON blocks[].",
             tool_names=[],
             output_key="blocks",
         ),

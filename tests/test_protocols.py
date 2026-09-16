@@ -27,8 +27,13 @@ from neuro_os.protocols import (
 
 
 class StepAgent:
-    def __init__(self, invalid_blocks: bool = False) -> None:
+    def __init__(
+        self,
+        invalid_blocks: bool = False,
+        block_energy_levels: list[str] | None = None,
+    ) -> None:
         self.invalid_blocks = invalid_blocks
+        self.block_energy_levels = block_energy_levels
         self.calls = 0
 
     async def run(self, prompt: str, context) -> str:
@@ -40,6 +45,21 @@ class StepAgent:
         if "Step: sequence_blocks" in prompt:
             if self.invalid_blocks:
                 return "not-json"
+            if self.block_energy_levels is not None:
+                return json.dumps(
+                    {
+                        "blocks": [
+                            {
+                                "title": f"Capacity block {index}",
+                                "energy_level": energy_level,
+                                "estimated_minutes": 30,
+                            }
+                            for index, energy_level in enumerate(
+                                self.block_energy_levels, start=1
+                            )
+                        ]
+                    }
+                )
             return json.dumps(
                 {
                     "blocks": [
@@ -352,3 +372,28 @@ async def test_morning_plan_cannot_exceed_the_users_stated_capacity(session):
     tasks = (await session.execute(select(Task))).scalars().all()
     assert run.status == "failed"
     assert tasks == []
+
+
+@pytest.mark.asyncio
+async def test_morning_plan_allows_recovery_blocks_for_recovery_capacity(session):
+    user = await _create_user(session)
+    session.add(
+        DailyEnergyCheckIn(
+            user_id=user.id,
+            check_in_date=datetime.now(ZoneInfo(user.timezone)).date(),
+            energy_level=EnergyLevel.RECOVERY,
+        )
+    )
+    await session.commit()
+
+    recovery_blocks = [EnergyLevel.RECOVERY.value] * 3
+    engine = ProtocolEngine(
+        session,
+        None,
+        lambda _protocol_type: StepAgent(block_energy_levels=recovery_blocks),
+    )
+    run = await engine.run_protocol(ProtocolType.MORNING, user.id)
+    tasks = (await session.execute(select(Task))).scalars().all()
+
+    assert run.status == "completed"
+    assert [task.energy_level for task in tasks] == [EnergyLevel.RECOVERY] * 3
