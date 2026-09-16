@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from enum import Enum
 from typing import Optional
 from uuid import UUID
@@ -187,13 +187,13 @@ class EnergyAwareScheduler:
         # Mark interrupted task
         interrupted_task.interruption_count = (interrupted_task.interruption_count or 0) + 1
         interrupted_task.context_snapshot = {
-            "interrupted_at": datetime.utcnow().isoformat(),
+            "interrupted_at": datetime.now(UTC).isoformat(),
             "interruption_duration_minutes": interruption_duration.total_seconds() / 60,
         }
 
         # Push remaining tasks forward
         new_blocks = []
-        current = datetime.utcnow() + timedelta(minutes=15)  # Recovery buffer
+        current = datetime.now(UTC) + timedelta(minutes=15)  # Recovery buffer
 
         for task in remaining_tasks:
             if task.id == interrupted_task.id:

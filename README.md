@@ -9,7 +9,7 @@ NeuroOS is a local-first protocol engine for the work a brain drops under load: 
 
 The test is not a star count. The test is whether `neuro-os recover` still knows what you were doing after a restart.
 
-This is a development baseline, not a production release. See [ROADMAP.md](ROADMAP.md) for gates.
+NeuroOS includes a hardened single-host Docker deployment profile. Read [PRODUCTION.md](PRODUCTION.md) before exposing it to users; a real launch still requires host-specific TLS, DNS, backup, monitoring, and secret-management setup.
 
 ---
 
@@ -49,10 +49,8 @@ Working now:
 
 Not done yet:
 
-- Local login token (CLI still prompts email + password)
 - Calendar / inbox provider adapters
-- Hosted UI
-- Hosted deployment and operational monitoring
+- Managed hosted deployment and operational monitoring
 
 ---
 
@@ -112,9 +110,11 @@ Point `DATABASE_URL` at Postgres (`postgresql+asyncpg://neuro:neuro@localhost:54
 
 ### Production configuration
 
-Set `ENVIRONMENT=production` only with an explicit deployment configuration. Production startup
-rejects placeholder or short `SECRET_KEY` values, `DEBUG=true`, missing model-provider credentials,
-and absent, wildcard, or non-HTTPS `CORS_ORIGINS`. For example:
+Use the production Compose profile and follow [PRODUCTION.md](PRODUCTION.md). Production startup
+rejects placeholder or short `SECRET_KEY` values, `DEBUG=true`, `DATABASE_ECHO=true`, sessions longer
+than 24 hours, missing model-provider credentials, and absent, wildcard, or non-HTTPS `CORS_ORIGINS`.
+The profile removes source mounts, does not publish Postgres or Redis, and only binds the API to loopback
+for a TLS reverse proxy. For example:
 
 ```dotenv
 ENVIRONMENT=production
@@ -122,6 +122,7 @@ DEBUG=false
 SECRET_KEY=replace-with-a-unique-secret-at-least-32-characters-long
 CORS_ORIGINS=https://app.example.com,https://admin.example.com
 OPENAI_API_KEY=replace-with-a-provider-key
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ```
 
 Redis limits registration and login by client IP within a 15-minute window, and limits authenticated

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from neuro_os import database
 from neuro_os.agent import AgentContext
 from neuro_os.models import DailyEnergyCheckIn, EnergyLevel, User
-from neuro_os.tools import GetEnergyProfileTool
+from neuro_os.tools import GetCalendarTool, GetEnergyProfileTool
 
 
 @pytest.mark.asyncio
@@ -46,3 +46,14 @@ async def test_energy_profile_includes_the_users_stated_capacity(
     assert result.error is None
     assert result.result["stated_capacity"] == "recovery"
     assert result.result["today_schedule"]
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_rejects_a_non_iso_date_before_opening_a_file() -> None:
+    result = await GetCalendarTool().execute(
+        {"date": "../../sensitive"},
+        AgentContext(user_id=uuid4(), session_id=uuid4()),
+    )
+
+    assert result.result == {"events": [], "source": "none"}
+    assert result.error == "Calendar date must use YYYY-MM-DD format"

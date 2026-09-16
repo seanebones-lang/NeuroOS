@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         description="JWT signing secret",
     )
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
+    access_token_expire_minutes: int = Field(default=24 * 60, ge=1)  # 24 hours
 
     # AI Providers
     openai_api_key: str | None = None
@@ -95,6 +95,10 @@ class Settings(BaseSettings):
             )
         if self.debug:
             raise ValueError("DEBUG must be false in production")
+        if self.database_echo:
+            raise ValueError("DATABASE_ECHO must be false in production")
+        if self.access_token_expire_minutes > 24 * 60:
+            raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES must not exceed 24 hours in production")
         if not any((self.openai_api_key, self.anthropic_api_key, self.google_api_key)):
             raise ValueError("production requires at least one configured AI provider key")
         if not self.cors_origin_list:

@@ -31,6 +31,8 @@ def test_production_settings_require_a_safe_configuration():
     [
         ({"secret_key": "too-short"}, "SECRET_KEY"),
         ({"debug": True}, "DEBUG"),
+        ({"database_echo": True}, "DATABASE_ECHO"),
+        ({"access_token_expire_minutes": 1441}, "ACCESS_TOKEN_EXPIRE_MINUTES"),
         ({"openai_api_key": None}, "AI provider"),
         ({"cors_origins": ""}, "CORS_ORIGINS"),
         ({"cors_origins": "*"}, "HTTPS origins"),

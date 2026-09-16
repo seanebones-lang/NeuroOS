@@ -1,0 +1,73 @@
+# Production override. Start it with:
+# docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
+#
+# Set the required variables from PRODUCTION.md in a deployment-only environment file
+# or secret manager. This profile keeps the API on loopback so a TLS reverse proxy
+# is the only public entry point.
+services:
+  postgres:
+    environment:
+      POSTGRES_USER: neuro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD for production}
+      POSTGRES_DB: neuro
+    ports: !reset []
+    restart: unless-stopped
+
+  redis:
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD for production}
+    ports: !reset []
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for production}
+    env_file: !reset []
+    restart: "no"
+
+  api:
+    command: uvicorn neuro_os.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips ${TRUSTED_PROXY_IPS:?Set TRUSTED_PROXY_IPS for production}
+    ports: !override
+      - "127.0.0.1:${NEURO_OS_PORT:-8011}:8000"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_ECHO: "false"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for production}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL for production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY for production}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS for production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    env_file: !reset []
+    volumes: !reset []
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_ECHO: "false"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL for production}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL for production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY for production}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS for production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    env_file: !reset []
+    volumes: !reset []
+    restart: unless-stopped

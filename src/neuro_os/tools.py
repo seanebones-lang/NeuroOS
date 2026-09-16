@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -270,11 +270,11 @@ class SaveTaskContextTool(BaseTool):
             # Merge with existing snapshot
             existing = task.context_snapshot or {}
             existing.update(new_context)
-            existing["last_updated"] = datetime.utcnow().isoformat()
+            existing["last_updated"] = datetime.now(UTC).isoformat()
 
             task.context_snapshot = existing
             if not task.started_at:
-                task.started_at = datetime.utcnow()
+                task.started_at = datetime.now(UTC)
 
             await session.commit()
 
@@ -301,7 +301,26 @@ class GetCalendarTool(BaseTool):
     async def execute(self, arguments: dict, context: AgentContext) -> ToolResult:
         from pathlib import Path
 
-        date_str = arguments.get("date") or datetime.now().strftime("%Y-%m-%d")
+        requested_date = arguments.get("date")
+        if requested_date is None:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+        elif isinstance(requested_date, str):
+            try:
+                date_str = date.fromisoformat(requested_date).isoformat()
+            except ValueError:
+                return ToolResult(
+                    tool_call_id="",
+                    name=self.name,
+                    result={"events": [], "source": "none"},
+                    error="Calendar date must use YYYY-MM-DD format",
+                )
+        else:
+            return ToolResult(
+                tool_call_id="",
+                name=self.name,
+                result={"events": [], "source": "none"},
+                error="Calendar date must use YYYY-MM-DD format",
+            )
 
         # Look for calendar file in user's neuro-os directory
         calendar_dir = Path.home() / ".neuro-os" / "calendar"
@@ -474,7 +493,7 @@ class GetDueAdminTool(BaseTool):
         from neuro_os.database import AsyncSessionLocal
         from neuro_os.models import AdminItem
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -673,7 +692,7 @@ class GetEnergyActualsTool(BaseTool):
         from neuro_os.models import Task, TaskStatus
 
         days = arguments.get("days", 7)
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(

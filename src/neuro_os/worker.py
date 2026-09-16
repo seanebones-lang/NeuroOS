@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import redis.asyncio as redis
@@ -106,7 +106,7 @@ class NeuroWorker:
                         select(AdminItem).where(
                             AdminItem.user_id == user.id,
                             AdminItem.is_active == True,
-                            AdminItem.next_due <= datetime.utcnow(),
+                            AdminItem.next_due <= datetime.now(UTC),
                         )
                     )
                     due_items = admin_result.scalars().all()
@@ -119,7 +119,7 @@ class NeuroWorker:
 
     def _calculate_next_due(self, item: AdminItem) -> datetime:
         """Calculate next due date based on frequency."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         if item.frequency == "daily":
             return now + timedelta(days=1)
         elif item.frequency == "weekly":

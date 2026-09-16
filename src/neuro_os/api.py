@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,14 +83,14 @@ class Token(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=12, max_length=128)
     full_name: Optional[str] = None
     timezone: str = "America/Chicago"
 
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 class UserResponse(BaseModel):
@@ -101,8 +101,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskCreate(TaskCreateData):
@@ -118,8 +117,7 @@ class EnergyCheckInResponse(BaseModel):
     energy_level: EnergyLevel
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskUpdate(TaskUpdateData):
@@ -169,8 +167,7 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProtocolRunRequest(BaseModel):
@@ -192,8 +189,7 @@ class ProtocolStepRunResponse(BaseModel):
     error_category: str | None
     error_message: str | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProtocolRunDetailResponse(BaseModel):
@@ -252,7 +248,7 @@ class MorningPlanResponse(BaseModel):
 def create_access_token(user_id: UUID) -> str:
     payload = {
         "sub": str(user_id),
-        "exp": datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes),
+        "exp": datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
@@ -261,7 +257,7 @@ def verify_token(token: str) -> Optional[UUID]:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         return UUID(payload.get("sub"))
-    except JWTError:
+    except (JWTError, TypeError, ValueError):
         return None
 
 
@@ -683,15 +679,13 @@ async def run_protocol(
 
     engine = ProtocolEngine(session, memory, agent_factory)
     effective_key = idempotency_key
-    if effective_key is None and request.protocol_type in {
-        ProtocolType.MORNING,
+    if effective_key is None and request.protocol_type == ProtocolType.MORNING:
+        effective_key = await morning_plan_idempotency_key(session, current_user)
+    elif effective_key is None and request.protocol_type in {
         ProtocolType.WEEKLY_REVIEW,
         ProtocolType.ADMIN_BATCH,
     }:
-        effective_key = daily_idempotency_key(
-            request.protocol_type,
-            current_user.timezone,
-        )
+        effective_key = daily_idempotency_key(request.protocol_type, current_user.timezone)
     run = await engine.run_protocol(
         request.protocol_type,
         current_user.id,
@@ -960,7 +954,3 @@ async def web_app() -> FileResponse:
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "neuro-os", "version": "0.1.0"}
-
-
-# Need timedelta import
-from datetime import timedelta

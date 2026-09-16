@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
@@ -26,7 +26,7 @@ class WorkingMemory:
             # Remove oldest
             oldest = next(iter(self.data))
             del self.data[oldest]
-        self.data[key] = {"value": value, "timestamp": datetime.utcnow().isoformat()}
+        self.data[key] = {"value": value, "timestamp": datetime.now(UTC).isoformat()}
 
     def get(self, key: str, default: Any = None) -> Any:
         item = self.data.get(key)
@@ -68,7 +68,7 @@ class LongTermMemory:
             "user_id": str(user_id),
             "content": content,
             "metadata": metadata,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "embedding": embedding,
         }
         await self.redis.set(key, json.dumps(data))

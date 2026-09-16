@@ -41,6 +41,11 @@ async def _register_and_login(
 @pytest.mark.asyncio
 async def test_auth_ownership_lifecycle_and_rollback(api_client: httpx.AsyncClient) -> None:
     assert (await api_client.get("/tasks")).status_code == HTTPStatus.UNAUTHORIZED
+    weak_password = await api_client.post(
+        "/auth/register",
+        json={"email": "weak-password@example.com", "password": "too-short"},
+    )
+    assert weak_password.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
     owner_headers = await _register_and_login(api_client, "owner@example.com")
     other_headers = await _register_and_login(api_client, "other@example.com")
 
