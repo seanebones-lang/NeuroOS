@@ -93,6 +93,14 @@ Inspect an authenticated execution at `GET /protocols/runs/{run_id}`. The respon
 step status, provider and model identity, duration, bounded tool activity, errors, and linked tasks.
 Raw prompts, model output, tool arguments, and tool results are not stored in the trace.
 
+## Verification
+
+Run the fast SQLite-backed suite with `pytest -q -m "not integration"`. PostgreSQL API integration
+tests require an isolated migrated database in `NEURO_OS_TEST_DATABASE_URL`; run them with
+`pytest -q -m integration`. CI rebuilds the PostgreSQL schema through a complete downgrade and
+upgrade before testing authentication, ownership, task rollback, lifecycle conflicts, and
+concurrent protocol idempotency.
+
 ## Energy Model
 
 Three levels drive everything:

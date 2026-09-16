@@ -298,4 +298,7 @@ def downgrade() -> None:
     op.drop_table("admin_items")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
+    sa.Enum(name="energylevel").drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="taskstatus").drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="protocoltype").drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###

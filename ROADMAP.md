@@ -18,6 +18,8 @@ The repository now has a working foundation:
 - Protocol retries and simultaneous daily-plan requests converge on one database-enforced run.
 - Each protocol step records status, timing, provider, model, bounded tool activity, output shape,
   and errors; authenticated users can inspect their own run traces.
+- CI rebuilds PostgreSQL migrations and exercises authentication, ownership, rollback, task
+  lifecycle conflicts, and concurrent protocol idempotency through the API.
 - Authenticated task writes enforce ownership, schedules, lifecycle transitions, and dependent
   deletion rules through one service.
 - The API, CLI, and worker use the same protocol and task-context services.
@@ -31,7 +33,7 @@ This is a development baseline. It is not yet a production release.
 Goal: every state transition is valid, attributable, and safe to retry.
 
 - Route remaining internal task-generation paths through the task service where appropriate.
-- Add API integration tests against PostgreSQL for authentication, ownership, and rollback cases.
+- Expand API integration coverage as new state transitions and protocol types are added.
 
 Exit gate:
 
@@ -108,6 +110,6 @@ Goal: make releases repeatable and reversible.
 
 ## Immediate next slice
 
-Add a repeatable PostgreSQL API integration suite and CI workflow covering authentication,
-ownership, idempotent concurrency, lifecycle conflicts, migrations, and rollback behavior. This
-turns the current live validation into an automated merge gate.
+Replace permissive cross-origin defaults and development secrets with an explicit environment
+security contract. Validate production startup so unsafe CORS, signing keys, and missing provider
+configuration fail before the service accepts traffic.
