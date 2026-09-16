@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
@@ -192,6 +192,16 @@ class ProtocolRunDetailResponse(BaseModel):
     notes: str | None
     steps: list[ProtocolStepRunResponse]
     tasks: list[dict]
+
+
+class ProtocolRunSummaryResponse(BaseModel):
+    run_id: UUID
+    protocol_id: UUID
+    status: str
+    idempotency_key: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    tasks_created: int
 
 
 class AdminItemCreate(BaseModel):
@@ -641,6 +651,38 @@ async def list_protocols(
             "is_default": p.is_default,
         }
         for p in protocols
+    ]
+
+
+@app.get("/protocols/runs", response_model=list[ProtocolRunSummaryResponse])
+async def list_protocol_runs(
+    limit: int = Query(default=10, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    runs = (
+        (
+            await session.execute(
+                select(ProtocolRun)
+                .where(ProtocolRun.user_id == current_user.id)
+                .order_by(ProtocolRun.started_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "run_id": run.id,
+            "protocol_id": run.protocol_id,
+            "status": run.status,
+            "idempotency_key": run.idempotency_key,
+            "started_at": run.started_at,
+            "completed_at": run.completed_at,
+            "tasks_created": run.tasks_created,
+        }
+        for run in runs
     ]
 
 

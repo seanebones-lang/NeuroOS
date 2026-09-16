@@ -153,6 +153,16 @@ async def test_concurrent_morning_requests_converge_on_one_run(
     assert sorted([first.status_code, second.status_code]) in expected_statuses
     successful = first if first.status_code == HTTPStatus.OK else second
     assert successful.json()["tasks_created"] == EXPECTED_MORNING_TASKS
+    history = await api_client.get("/protocols/runs", headers=headers)
+    assert history.status_code == HTTPStatus.OK, history.text
+    assert len(history.json()) == 1
+    saved_run = history.json()[0]
+    assert saved_run["run_id"] == successful.json()["run_id"]
+    assert saved_run["status"] == "completed"
+    assert saved_run["idempotency_key"] == "integration-concurrent-morning"
+    assert saved_run["tasks_created"] == EXPECTED_MORNING_TASKS
+    other_headers = await _register_and_login(api_client, "run-history-other@example.com")
+    assert (await api_client.get("/protocols/runs", headers=other_headers)).json() == []
     async with integration_session_factory() as session:
         run_count = await session.scalar(select(func.count()).select_from(ProtocolRun))
         task_count = await session.scalar(select(func.count()).select_from(Task))
