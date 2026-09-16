@@ -17,3 +17,5 @@ async def test_browser_workspace_is_served_from_the_api_origin():
     assert response.status_code == HTTPStatus.OK
     assert "Make the next thing" in response.text
     assert "Open the focused workspace preview" in response.text
+    assert "Leave a handoff" in response.text
+    assert "Return without rebuilding" in response.text
