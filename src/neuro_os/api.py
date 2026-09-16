@@ -487,6 +487,21 @@ def local_today(timezone: str) -> date:
         return datetime.now(ZoneInfo("UTC")).date()
 
 
+async def morning_plan_idempotency_key(session: AsyncSession, user: User) -> str:
+    """Keep retries stable while allowing a changed same-day capacity to replan."""
+    daily_key = daily_idempotency_key(ProtocolType.MORNING, user.timezone)
+    check_in = await session.scalar(
+        select(DailyEnergyCheckIn).where(
+            DailyEnergyCheckIn.user_id == user.id,
+            DailyEnergyCheckIn.check_in_date == local_today(user.timezone),
+        )
+    )
+    if check_in is None:
+        return daily_key
+    revision = check_in.updated_at.astimezone(ZoneInfo("UTC")).isoformat()
+    return f"{daily_key}:capacity:{check_in.energy_level.value}:{revision}"
+
+
 @app.get("/energy/check-in", response_model=EnergyCheckInResponse | None)
 async def get_energy_check_in(
     current_user: User = Depends(get_current_user),
@@ -832,10 +847,7 @@ async def generate_morning_plan(
         )
 
     engine = ProtocolEngine(session, memory, agent_factory)
-    effective_key = idempotency_key or daily_idempotency_key(
-        ProtocolType.MORNING,
-        current_user.timezone,
-    )
+    effective_key = idempotency_key or await morning_plan_idempotency_key(session, current_user)
     run = await engine.run_protocol(
         ProtocolType.MORNING,
         current_user.id,
