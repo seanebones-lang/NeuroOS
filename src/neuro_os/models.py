@@ -1,6 +1,6 @@
 """SQLAlchemy models for NeuroOS."""
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum as PyEnum
 from typing import Optional
 from uuid import UUID, uuid4
@@ -55,6 +55,7 @@ class User(Base):
     tasks: Mapped[list["Task"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     protocols: Mapped[list["Protocol"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     energy_profile: Mapped[Optional["EnergyProfile"]] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    energy_check_ins: Mapped[list["DailyEnergyCheckIn"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     comms_templates: Mapped[list["CommsTemplate"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     admin_items: Mapped[list["AdminItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -68,6 +69,25 @@ class EnergyProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship(back_populates="energy_profile")
+
+
+class DailyEnergyCheckIn(Base):
+    """A user's stated capacity for one local calendar day."""
+
+    __tablename__ = "daily_energy_check_ins"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    check_in_date: Mapped[date] = mapped_column(nullable=False)
+    energy_level: Mapped[EnergyLevel] = mapped_column(Enum(EnergyLevel), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="energy_check_ins")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "check_in_date", name="uq_daily_energy_check_ins_user_date"),
+    )
 
 
 class Task(Base):

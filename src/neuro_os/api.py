@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,7 @@ from neuro_os.memory import MemoryManager
 from neuro_os.models import (
     AdminItem,
     CommsTemplate,
+    DailyEnergyCheckIn,
     EnergyLevel,
     Protocol,
     ProtocolRun,
@@ -105,6 +107,19 @@ class UserResponse(BaseModel):
 
 class TaskCreate(TaskCreateData):
     """API request for validated task creation."""
+
+
+class EnergyCheckInRequest(BaseModel):
+    energy_level: EnergyLevel
+
+
+class EnergyCheckInResponse(BaseModel):
+    check_in_date: date
+    energy_level: EnergyLevel
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class TaskUpdate(TaskUpdateData):
@@ -462,6 +477,54 @@ async def login(
 @app.get("/auth/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+def local_today(timezone: str) -> date:
+    """Return today's date in a user's IANA timezone, with a safe UTC fallback."""
+    try:
+        return datetime.now(ZoneInfo(timezone)).date()
+    except ZoneInfoNotFoundError:
+        return datetime.now(ZoneInfo("UTC")).date()
+
+
+@app.get("/energy/check-in", response_model=EnergyCheckInResponse | None)
+async def get_energy_check_in(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    return await session.scalar(
+        select(DailyEnergyCheckIn).where(
+            DailyEnergyCheckIn.user_id == current_user.id,
+            DailyEnergyCheckIn.check_in_date == local_today(current_user.timezone),
+        )
+    )
+
+
+@app.put("/energy/check-in", response_model=EnergyCheckInResponse)
+async def save_energy_check_in(
+    check_in: EnergyCheckInRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    today = local_today(current_user.timezone)
+    saved_check_in = await session.scalar(
+        select(DailyEnergyCheckIn).where(
+            DailyEnergyCheckIn.user_id == current_user.id,
+            DailyEnergyCheckIn.check_in_date == today,
+        )
+    )
+    if saved_check_in is None:
+        saved_check_in = DailyEnergyCheckIn(
+            user_id=current_user.id,
+            check_in_date=today,
+            energy_level=check_in.energy_level,
+        )
+        session.add(saved_check_in)
+    else:
+        saved_check_in.energy_level = check_in.energy_level
+    await session.commit()
+    await session.refresh(saved_check_in)
+    return saved_check_in
 
 
 # Task endpoints

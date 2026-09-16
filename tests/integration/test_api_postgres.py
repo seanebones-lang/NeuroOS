@@ -44,6 +44,18 @@ async def test_auth_ownership_lifecycle_and_rollback(api_client: httpx.AsyncClie
     owner_headers = await _register_and_login(api_client, "owner@example.com")
     other_headers = await _register_and_login(api_client, "other@example.com")
 
+    assert (await api_client.get("/energy/check-in", headers=owner_headers)).json() is None
+    saved_energy = await api_client.put(
+        "/energy/check-in", headers=owner_headers, json={"energy_level": "recovery"}
+    )
+    assert saved_energy.status_code == HTTPStatus.OK, saved_energy.text
+    assert saved_energy.json()["energy_level"] == "recovery"
+    updated_energy = await api_client.put(
+        "/energy/check-in", headers=owner_headers, json={"energy_level": "deep"}
+    )
+    assert updated_energy.json()["energy_level"] == "deep"
+    assert (await api_client.get("/energy/check-in", headers=other_headers)).json() is None
+
     parent_response = await api_client.post(
         "/tasks",
         headers=owner_headers,

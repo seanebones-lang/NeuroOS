@@ -21,3 +21,4 @@ async def test_browser_workspace_is_served_from_the_api_origin():
     assert "Return without rebuilding" in response.text
     assert "Protocol trail" in response.text
     assert "Plan trace" in response.text
+    assert "Today is set to" in response.text
