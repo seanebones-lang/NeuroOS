@@ -1,3 +1,4 @@
+https://github.com/user-attachments/assets/8c3b5ba0-7c3a-4a48-9e2d-266edb219193
 # NeuroOS
 
 **External executive function for neurodivergent builders and shop owners.**
