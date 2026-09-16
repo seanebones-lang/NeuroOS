@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f5ef">
+  <title>NeuroOS — Today</title>
+  <style>
+    :root {
+      --ink: #20231e;
+      --muted: #71776e;
+      --paper: #f6f5ef;
+      --card: #fffefa;
+      --line: #dfdfd5;
+      --lime: #d8ed72;
+      --moss: #355846;
+      --blue: #dcebf3;
+      --peach: #f7e4d2;
+      --violet: #e9e1f6;
+      --danger: #b33c2f;
+      --shadow: 0 12px 32px rgba(37, 48, 36, .07);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--paper); color: var(--ink); font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { display: flex; flex-direction: column; padding: 28px 17px 20px; border-right: 1px solid var(--line); background: #eeefe6; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 28px; font-weight: 770; font-size: 20px; letter-spacing: -.05em; }
+    .mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--moss); color: var(--lime); font-size: 18px; }
+    .eyebrow { padding: 0 9px 8px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    .nav { display: grid; gap: 3px; }
+    .nav button { display: flex; align-items: center; width: 100%; gap: 11px; border: 0; border-radius: 10px; padding: 10px; background: transparent; color: #4f554d; text-align: left; }
+    .nav button.active { background: var(--card); box-shadow: 0 1px 0 rgba(24, 32, 21, .05); color: var(--ink); font-weight: 700; }
+    .nav .icon { width: 19px; text-align: center; color: var(--moss); }
+    .sidebar-foot { margin-top: auto; padding: 16px 8px 0; border-top: 1px solid var(--line); }
+    .account { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; background: transparent; color: var(--ink); padding: 5px 0; text-align: left; }
+    .avatar { display: grid; place-items: center; flex: 0 0 auto; width: 31px; height: 31px; border-radius: 50%; background: var(--violet); color: #665075; font-weight: 700; font-size: 12px; }
+    .account small { display: block; color: var(--muted); }
+    main { min-width: 0; padding: 30px clamp(20px, 4vw, 62px) 48px; }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 28px; }
+    .date { color: var(--muted); font-size: 13px; }
+    .status { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d7dfc1; border-radius: 99px; padding: 6px 10px; background: #f4f8e8; color: #4d6339; font-size: 12px; font-weight: 650; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #78a649; }
+    .hero { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 31px; }
+    h1 { margin: 0; max-width: 700px; font-size: clamp(34px, 5vw, 58px); line-height: .98; letter-spacing: -.065em; font-weight: 770; }
+    .hero p { max-width: 540px; margin: 14px 0 0; color: var(--muted); font-size: 16px; }
+    .action-row { display: flex; flex-wrap: wrap; gap: 9px; }
+    .button { border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; background: var(--card); color: var(--ink); font-weight: 680; box-shadow: 0 1px 0 rgba(32, 35, 30, .03); }
+    .button.primary { border-color: var(--moss); background: var(--moss); color: white; }
+    .button.lime { border-color: #cce264; background: var(--lime); }
+    .button:hover { transform: translateY(-1px); }
+    .focus { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(250px, .8fr); gap: 16px; margin-bottom: 31px; }
+    .focus-card { position: relative; overflow: hidden; border-radius: 18px; padding: 25px; background: var(--moss); color: white; box-shadow: var(--shadow); }
+    .focus-card::after { content: ""; position: absolute; width: 260px; height: 260px; right: -96px; bottom: -178px; border: 1px solid rgba(216,237,114,.5); border-radius: 50%; box-shadow: 0 0 0 38px rgba(216,237,114,.08), 0 0 0 77px rgba(216,237,114,.05); }
+    .focus-card .eyebrow { padding: 0; color: #c6d8c3; }
+    .focus-title { position: relative; z-index: 1; max-width: 590px; margin: 8px 0 14px; font-size: 25px; line-height: 1.16; letter-spacing: -.035em; }
+    .focus-detail { position: relative; z-index: 1; margin: 0 0 20px; color: #d1ded0; }
+    .focus-card .button { position: relative; z-index: 1; border: 0; background: var(--lime); color: #283426; }
+    .rhythm { display: grid; grid-template-rows: auto 1fr; border: 1px solid var(--line); border-radius: 18px; background: var(--card); overflow: hidden; }
+    .rhythm-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 19px 14px; border-bottom: 1px solid var(--line); }
+    .rhythm-head strong { letter-spacing: -.02em; }
+    .rhythm-body { display: grid; align-content: center; gap: 11px; padding: 17px 19px; }
+    .meter { height: 8px; border-radius: 99px; background: #e8e9df; overflow: hidden; }
+    .meter > span { display: block; width: 70%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9cbe66, var(--lime)); }
+    .rhythm small { color: var(--muted); }
+    .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin: 0 0 13px; }
+    .section-heading h2 { margin: 0; font-size: 19px; letter-spacing: -.035em; }
+    .section-heading span { color: var(--muted); font-size: 13px; }
+    .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .lane { min-height: 276px; border: 1px solid var(--line); border-radius: 15px; padding: 13px; background: rgba(255,254,250,.7); }
+    .lane-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 3px 12px; }
+    .lane-head strong { font-size: 13px; letter-spacing: -.01em; }
+    .count { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--muted); background: #e9e9e1; font-size: 11px; }
+    .task-list { display: grid; gap: 9px; }
+    .task { border: 1px solid #e4e4dc; border-radius: 11px; padding: 13px; background: var(--card); transition: transform .16s ease, box-shadow .16s ease; }
+    .task:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(38,45,35,.08); }
+    .task-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .task-title { font-weight: 680; line-height: 1.25; letter-spacing: -.015em; }
+    .task small { display: block; margin-top: 7px; color: var(--muted); font-size: 12px; }
+    .pill { display: inline-flex; align-items: center; border-radius: 99px; padding: 3px 7px; font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+    .deep { background: var(--violet); color: #655171; }
+    .shallow { background: var(--blue); color: #3f6372; }
+    .recovery { background: var(--peach); color: #845b3d; }
+    .task-actions { display: flex; gap: 7px; margin-top: 11px; }
+    .task-actions button { border: 0; padding: 0; background: transparent; color: var(--moss); font-size: 12px; font-weight: 700; }
+    .empty { margin: 22px 4px; color: var(--muted); font-size: 13px; }
+    .toast { position: fixed; z-index: 10; right: 22px; bottom: 22px; max-width: 340px; border-radius: 12px; padding: 12px 15px; background: #28362d; color: white; box-shadow: var(--shadow); opacity: 0; transform: translateY(18px); pointer-events: none; transition: .2s; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    dialog { width: min(450px, calc(100vw - 32px)); border: 0; border-radius: 18px; padding: 0; color: var(--ink); background: var(--card); box-shadow: 0 25px 70px rgba(22,28,21,.25); }
+    dialog::backdrop { background: rgba(31,38,30,.38); backdrop-filter: blur(3px); }
+    .dialog-body { padding: 24px; }
+    .dialog-body h2 { margin: 0 0 6px; letter-spacing: -.04em; }
+    .dialog-body p { margin: 0 0 20px; color: var(--muted); }
+    .form { display: grid; gap: 12px; }
+    label { display: grid; gap: 6px; color: #4e564d; font-size: 12px; font-weight: 700; }
+    input, select { width: 100%; border: 1px solid #d9dad1; border-radius: 9px; padding: 10px; background: #fffefa; color: var(--ink); }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    .auth { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(circle at 80% 18%, #edf5bc 0, transparent 28%), radial-gradient(circle at 12% 90%, #e0eef5 0, transparent 29%), var(--paper); }
+    .auth-card { width: min(460px, 100%); border: 1px solid var(--line); border-radius: 20px; padding: 34px; background: rgba(255,254,250,.88); box-shadow: var(--shadow); }
+    .auth-card h1 { margin-top: 20px; font-size: 42px; }
+    .auth-card p { color: var(--muted); }
+    .auth-tabs { display: flex; gap: 16px; margin: 22px 0 15px; border-bottom: 1px solid var(--line); }
+    .auth-tabs button { padding: 0 0 9px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 700; }
+    .auth-tabs button.active { border-color: var(--moss); color: var(--ink); }
+    .auth-note { margin-top: 17px; font-size: 12px; color: var(--muted); }
+    .link-button { border: 0; padding: 0; background: transparent; color: var(--moss); font-weight: 700; }
+    .hidden { display: none !important; }
+    @media (max-width: 850px) { .shell { grid-template-columns: 1fr; } .sidebar { display: none; } .focus { grid-template-columns: 1fr; } .board { grid-template-columns: 1fr; } .lane { min-height: 0; } }
+    @media (max-width: 540px) { main { padding: 20px 16px 35px; } .hero { display: block; } .hero .action-row { margin-top: 18px; } .topline { margin-bottom: 22px; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" class="toast" role="status"></div>
+  <dialog id="task-dialog">
+    <div class="dialog-body">
+      <h2>Add a task</h2><p>Give future-you a small, clear handhold.</p>
+      <form id="task-form" class="form">
+        <label>Task title<input id="task-title-input" required maxlength="500" placeholder="e.g. Draft the client response"></label>
+        <label>Energy needed<select id="task-energy-input"><option value="deep">Deep focus</option><option value="shallow" selected>Shallow focus</option><option value="recovery">Recovery</option></select></label>
+        <label>Estimated minutes<input id="task-minutes-input" type="number" min="1" max="1440" value="30"></label>
+        <div class="dialog-actions"><button type="button" class="button" onclick="closeTaskDialog()">Cancel</button><button class="button primary" type="submit">Save task</button></div>
+      </form>
+    </div>
+  </dialog>
+  <script>
+    const state = { token: localStorage.getItem('neuro-os-token'), user: null, tasks: [], demo: false, authMode: 'login' };
+    const demoTasks = [
+      { id: 'demo-1', title: 'Shape the next client workflow', energy_level: 'deep', estimated_minutes: 75, status: 'in_progress' },
+      { id: 'demo-2', title: 'Reply to two open messages', energy_level: 'shallow', estimated_minutes: 20, status: 'open' },
+      { id: 'demo-3', title: 'Review tomorrow’s constraints', energy_level: 'shallow', estimated_minutes: 15, status: 'open' },
+      { id: 'demo-4', title: 'Walk without a podcast', energy_level: 'recovery', estimated_minutes: 20, status: 'deferred' },
+    ];
+    const $ = (selector) => document.querySelector(selector);
+    const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[character]));
+    const api = async (path, options = {}) => {
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      const response = await fetch(path, { ...options, headers });
+      if (response.status === 204) return null;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Something went wrong');
+      return payload;
+    };
+    const toast = (message) => { const element = $('#toast'); element.textContent = message; element.classList.add('show'); setTimeout(() => element.classList.remove('show'), 3600); };
+    const displayName = () => state.demo ? 'Sean' : (state.user?.full_name || state.user?.email?.split('@')[0] || 'there');
+    const today = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
+    const energyLabel = (level) => ({ deep: 'Deep', shallow: 'Shallow', recovery: 'Recovery' }[level] || level);
+    const taskCard = (task) => `<article class="task"><div class="task-top"><div class="task-title">${escapeHtml(task.title)}</div><span class="pill ${escapeHtml(task.energy_level)}">${energyLabel(task.energy_level)}</span></div><small>${task.estimated_minutes ? `${task.estimated_minutes} min` : 'Unestimated'}${task.status === 'in_progress' ? ' · In progress' : ''}</small><div class="task-actions">${task.status !== 'in_progress' && task.status !== 'done' ? `<button onclick="startTask('${task.id}')">Begin</button>` : ''}${task.status !== 'done' ? `<button onclick="completeTask('${task.id}')">Complete</button>` : ''}</div></article>`;
+    const lane = (name, tasks, description) => `<section class="lane"><div class="lane-head"><strong>${name}</strong><span class="count">${tasks.length}</span></div><div class="task-list">${tasks.length ? tasks.map(taskCard).join('') : `<p class="empty">${description}</p>`}</div></section>`;
+    function renderWorkspace() {
+      const tasks = state.tasks;
+      const now = tasks.filter((task) => task.status === 'in_progress');
+      const next = tasks.filter((task) => task.status === 'open' || task.status === 'blocked');
+      const later = tasks.filter((task) => ['deferred', 'cancelled'].includes(task.status));
+      const focusTask = now[0] || next[0];
+      $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="mark">↗</span>NeuroOS</div><div class="eyebrow">Your operating system</div><nav class="nav"><button class="active"><span class="icon">◒</span>Today</button><button><span class="icon">↺</span>Recovery</button><button><span class="icon">◌</span>Rhythm</button><button><span class="icon">⌁</span>Protocols</button></nav><div class="sidebar-foot"><button class="account" onclick="logout()"><span class="avatar">${escapeHtml(displayName().slice(0, 2).toUpperCase())}</span><span><strong>${escapeHtml(displayName())}</strong><small>${state.demo ? 'Preview mode' : 'Sign out'}</small></span></button></div></aside><main><div class="topline"><span class="date">${today}</span><span class="status"><i class="dot"></i>${state.demo ? 'Preview workspace' : 'System ready'}</span></div><section class="hero"><div><h1>Make the next thing<br>easy to begin.</h1><p>NeuroOS holds the thread so you can return to work without reconstructing the whole day.</p></div><div class="action-row"><button class="button" onclick="openTaskDialog()">+ Add task</button><button class="button lime" onclick="runMorningPlan()">Plan my morning</button></div></section><section class="focus"><article class="focus-card"><div class="eyebrow">${focusTask ? 'Your next useful move' : 'A quiet moment'}</div><h2 class="focus-title">${focusTask ? escapeHtml(focusTask.title) : 'Nothing is asking for your attention right now.'}</h2><p class="focus-detail">${focusTask ? `${energyLabel(focusTask.energy_level)} energy · ${focusTask.estimated_minutes || 'Unestimated'} minutes · Keep it small enough to begin.` : 'Add one honest task, or let the day be done.'}</p>${focusTask && focusTask.status !== 'in_progress' ? `<button class="button" onclick="startTask('${focusTask.id}')">Begin this task →</button>` : ''}</article><aside class="rhythm"><div class="rhythm-head"><strong>Energy rhythm</strong><span class="pill deep">Deep</span></div><div class="rhythm-body"><div class="meter"><span></span></div><small>Your high-focus window is open. Protect it from shallow work.</small></div></aside></section><div class="section-heading"><h2>Today’s shape</h2><span>${tasks.length} active threads</span></div><section class="board">${lane('Now', now, 'Choose one task to bring into focus.')}${lane('Next', next, 'Your next clear actions will collect here.')}${lane('Later', later, 'Deferred work stays visible without crowding now.')}</section></main></div>`;
+    }
+    function renderAuth() {
+      const register = state.authMode === 'register';
+      $('#app').innerHTML = `<main class="auth"><section class="auth-card"><div class="brand"><span class="mark">↗</span>NeuroOS</div><h1>Hold the thread.</h1><p>A calm workspace for starting, pausing, and returning to meaningful work.</p><div class="auth-tabs"><button class="${!register ? 'active' : ''}" onclick="setAuthMode('login')">Sign in</button><button class="${register ? 'active' : ''}" onclick="setAuthMode('register')">Create account</button></div><form id="auth-form" class="form">${register ? '<label>Name (optional)<input id="auth-name" maxlength="255" placeholder="Your name"></label>' : ''}<label>Email<input id="auth-email" type="email" required autocomplete="email" placeholder="you@example.com"></label><label>Password<input id="auth-password" type="password" required minlength="8" autocomplete="current-password" placeholder="At least 8 characters"></label><button class="button primary" type="submit">${register ? 'Create a calm workspace' : 'Enter NeuroOS'}</button></form><p class="auth-note">Just exploring? <button class="link-button" onclick="enterDemo()">Open the focused workspace preview</button>.</p></section></main>`;
+      $('#auth-form').addEventListener('submit', submitAuth);
+    }
+    async function submitAuth(event) { event.preventDefault(); const email = $('#auth-email').value; const password = $('#auth-password').value; try { if (state.authMode === 'register') await api('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, full_name: $('#auth-name').value || null }) }); const result = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); state.token = result.access_token; state.demo = false; localStorage.setItem('neuro-os-token', state.token); await loadWorkspace(); } catch (error) { toast(error.message); } }
+    function setAuthMode(mode) { state.authMode = mode; renderAuth(); }
+    function enterDemo() { state.demo = true; state.tasks = demoTasks.map((task) => ({ ...task })); renderWorkspace(); }
+    async function loadWorkspace() { try { state.user = await api('/auth/me'); state.tasks = await api('/tasks'); renderWorkspace(); } catch (error) { localStorage.removeItem('neuro-os-token'); state.token = null; toast('Your session ended. Please sign in again.'); renderAuth(); } }
+    function openTaskDialog() { if (state.demo) return toast('Preview mode is read-only. Create an account to save work.'); $('#task-dialog').showModal(); $('#task-title-input').focus(); }
+    function closeTaskDialog() { $('#task-dialog').close(); }
+    async function startTask(id) { if (state.demo) return toast('Preview mode is read-only.'); try { await api(`/tasks/${id}/start`, { method: 'POST', body: JSON.stringify({}) }); await loadWorkspace(); } catch (error) { toast(error.message); } }
+    async function completeTask(id) { if (state.demo) return toast('Preview mode is read-only.'); try { await api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }); await loadWorkspace(); } catch (error) { toast(error.message); } }
+    async function runMorningPlan() { if (state.demo) return toast('Morning planning connects to your account and configured model provider.'); try { await api('/morning/plan', { method: 'POST', body: JSON.stringify({}) }); toast('Morning plan is ready.'); await loadWorkspace(); } catch (error) { toast(error.message); } }
+    async function logout() { if (state.demo) { state.demo = false; state.tasks = []; renderAuth(); return; } localStorage.removeItem('neuro-os-token'); state.token = null; state.user = null; renderAuth(); }
+    $('#task-form').addEventListener('submit', async (event) => { event.preventDefault(); try { const task = await api('/tasks', { method: 'POST', body: JSON.stringify({ title: $('#task-title-input').value, energy_level: $('#task-energy-input').value, estimated_minutes: Number($('#task-minutes-input').value) || null }) }); state.tasks.push(task); closeTaskDialog(); renderWorkspace(); toast('Task saved.'); } catch (error) { toast(error.message); } });
+    state.token ? loadWorkspace() : renderAuth();
+  </script>
+</body>
+</html>
