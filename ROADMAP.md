@@ -20,6 +20,8 @@ The repository now has a working foundation:
   and errors; authenticated users can inspect their own run traces.
 - CI rebuilds PostgreSQL migrations and exercises authentication, ownership, rollback, task
   lifecycle conflicts, and concurrent protocol idempotency through the API.
+- Production configuration rejects weak signing keys, debug mode, missing provider credentials, and
+  wildcard or non-HTTPS CORS origins before services start.
 - Authenticated task writes enforce ownership, schedules, lifecycle transitions, and dependent
   deletion rules through one service.
 - The API, CLI, and worker use the same protocol and task-context services.
@@ -110,6 +112,6 @@ Goal: make releases repeatable and reversible.
 
 ## Immediate next slice
 
-Replace permissive cross-origin defaults and development secrets with an explicit environment
-security contract. Validate production startup so unsafe CORS, signing keys, and missing provider
-configuration fail before the service accepts traffic.
+Add authenticated rate limiting and abuse controls for login, registration, and protocol execution.
+Keep limits observable and configurable per deployment so a single user cannot exhaust model calls
+or password-hash capacity.

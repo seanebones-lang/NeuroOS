@@ -51,7 +51,7 @@ Not done yet:
 - Local login token (CLI still prompts email + password)
 - Calendar / inbox provider adapters
 - Hosted UI
-- Production secret / CORS / rate-limit hardening
+- Rate limiting and abuse controls
 
 ---
 
@@ -108,6 +108,20 @@ neuro-os serve          # http://127.0.0.1:8000
 ```
 
 Point `DATABASE_URL` at Postgres (`postgresql+asyncpg://neuro:neuro@localhost:5432/neuro`). Do not mix a local SQLite file with the Compose database.
+
+### Production configuration
+
+Set `ENVIRONMENT=production` only with an explicit deployment configuration. Production startup
+rejects placeholder or short `SECRET_KEY` values, `DEBUG=true`, missing model-provider credentials,
+and absent, wildcard, or non-HTTPS `CORS_ORIGINS`. For example:
+
+```dotenv
+ENVIRONMENT=production
+DEBUG=false
+SECRET_KEY=replace-with-a-unique-secret-at-least-32-characters-long
+CORS_ORIGINS=https://app.example.com,https://admin.example.com
+OPENAI_API_KEY=replace-with-a-provider-key
+```
 
 ---
 

@@ -314,7 +314,7 @@ async def handle_task_service_error(_request: Request, error: TaskServiceError) 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
