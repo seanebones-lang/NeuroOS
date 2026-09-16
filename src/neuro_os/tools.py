@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from neuro_os.agent import AgentContext, BaseTool, ToolResult
 from neuro_os.models import EnergyLevel, Task, TaskStatus
@@ -74,13 +75,26 @@ class GetEnergyProfileTool(BaseTool):
         from sqlalchemy import select
 
         from neuro_os.database import AsyncSessionLocal
-        from neuro_os.models import EnergyProfile
+        from neuro_os.models import DailyEnergyCheckIn, EnergyProfile, User
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(EnergyProfile).where(EnergyProfile.user_id == context.user_id)
             )
             profile = result.scalar_one_or_none()
+
+            user = await session.get(User, context.user_id)
+            timezone = user.timezone if user is not None else "UTC"
+            try:
+                check_in_date = datetime.now(ZoneInfo(timezone)).date()
+            except ZoneInfoNotFoundError:
+                check_in_date = datetime.now(ZoneInfo("UTC")).date()
+            check_in = await session.scalar(
+                select(DailyEnergyCheckIn).where(
+                    DailyEnergyCheckIn.user_id == context.user_id,
+                    DailyEnergyCheckIn.check_in_date == check_in_date,
+                )
+            )
 
             if not profile:
                 from neuro_os.scheduler import create_default_energy_profile
@@ -89,7 +103,7 @@ class GetEnergyProfileTool(BaseTool):
             else:
                 pattern = profile.weekly_pattern
 
-            today = datetime.now().strftime("%a").lower()
+            today = check_in_date.strftime("%a").lower()
             today_schedule = pattern.get(today, [])
 
             return ToolResult(
@@ -98,6 +112,7 @@ class GetEnergyProfileTool(BaseTool):
                 result={
                     "today_schedule": today_schedule,
                     "full_pattern": pattern,
+                    "stated_capacity": check_in.energy_level.value if check_in else None,
                 },
             )
 

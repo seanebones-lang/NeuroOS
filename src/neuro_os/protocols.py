@@ -64,15 +64,15 @@ MORNING_PROTOCOL = ProtocolDefinition(
         ),
         ProtocolStep(
             name="assess_energy",
-            description="Load user's energy profile for today",
-            agent_prompt="Load energy profile for today. Return energy_blocks with time ranges and energy levels.",
+            description="Load today's energy profile and the user's stated capacity, if available",
+            agent_prompt="Load energy profile for today. If stated_capacity is present, treat it as the user's current capacity and plan accordingly. Return energy_blocks with time ranges and energy levels.",
             tool_names=["get_energy_profile"],
             output_key="energy",
         ),
         ProtocolStep(
             name="sequence_blocks",
             description="Create 3 sequenced work blocks matched to energy curve",
-            agent_prompt="Using inputs and energy profile, create exactly 3 work blocks (deep, shallow, recovery). Each block MUST include: title, energy_level (deep/shallow/recovery), estimated_minutes, scheduled_start (ISO format). Return JSON blocks[].",
+            agent_prompt="Using inputs, energy profile, and stated capacity when available, create exactly 3 work blocks (deep, shallow, recovery). Keep the plan within the user's stated capacity. Each block MUST include: title, energy_level (deep/shallow/recovery), estimated_minutes, scheduled_start (ISO format). Return JSON blocks[].",
             tool_names=[],
             output_key="blocks",
         ),
