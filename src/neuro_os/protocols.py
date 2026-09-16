@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from neuro_os.agent import Agent, AgentContext, ToolCall, ToolResult
 from neuro_os.memory import MemoryManager
 from neuro_os.models import (
+    DailyEnergyCheckIn,
     EnergyLevel,
     Protocol,
     ProtocolRun,
@@ -24,6 +25,7 @@ from neuro_os.models import (
     ProtocolType,
     Task,
     TaskStatus,
+    User,
 )
 
 
@@ -48,6 +50,16 @@ class ProtocolDefinition:
     description: str
     steps: list[ProtocolStep]
     entry_conditions: dict = field(default_factory=dict)
+
+
+def _fits_stated_capacity(block_energy: EnergyLevel, stated_capacity: EnergyLevel) -> bool:
+    """Keep a plan from assigning work above the capacity the user named today."""
+    capacity_rank = {
+        EnergyLevel.RECOVERY: 0,
+        EnergyLevel.SHALLOW: 1,
+        EnergyLevel.DEEP: 2,
+    }
+    return capacity_rank[block_energy] <= capacity_rank[stated_capacity]
 
 
 MORNING_PROTOCOL = ProtocolDefinition(
@@ -350,7 +362,10 @@ class ProtocolEngine:
                     working_memory[step.output_key] = parsed_result
 
             if protocol_type == ProtocolType.MORNING:
-                blocks = self._validate_morning_blocks(working_memory.get("blocks"))
+                stated_capacity = await self._current_stated_capacity(user_id)
+                blocks = self._validate_morning_blocks(
+                    working_memory.get("blocks"), stated_capacity
+                )
                 tasks_created = await self._create_tasks_from_blocks(
                     user_id, protocol_id, run.id, blocks
                 )
@@ -537,8 +552,28 @@ class ProtocolEngine:
                 return parsed["items"]
         return parsed
 
+    async def _current_stated_capacity(self, user_id: UUID) -> EnergyLevel | None:
+        """Load the user's capacity for their local calendar day."""
+        user = await self.session.get(User, user_id)
+        if user is None:
+            return None
+        try:
+            today = datetime.now(ZoneInfo(user.timezone)).date()
+        except ZoneInfoNotFoundError:
+            today = datetime.now(UTC).date()
+        check_in = await self.session.scalar(
+            select(DailyEnergyCheckIn).where(
+                DailyEnergyCheckIn.user_id == user_id,
+                DailyEnergyCheckIn.check_in_date == today,
+            )
+        )
+        return check_in.energy_level if check_in is not None else None
+
     @staticmethod
-    def _validate_morning_blocks(blocks: Any) -> list[dict]:
+    def _validate_morning_blocks(
+        blocks: Any,
+        stated_capacity: EnergyLevel | None = None,
+    ) -> list[dict]:
         if not isinstance(blocks, list) or len(blocks) != 3:
             raise ProtocolExecutionError("Morning planning must produce exactly three work blocks")
         validated = []
@@ -551,7 +586,7 @@ class ProtocolEngine:
             if not isinstance(title, str) or not title.strip():
                 raise ProtocolExecutionError(f"Morning block {index} has no title")
             try:
-                EnergyLevel(energy_level)
+                block_energy = EnergyLevel(energy_level)
             except (TypeError, ValueError):
                 raise ProtocolExecutionError(
                     f"Morning block {index} has an invalid energy level"
@@ -562,6 +597,13 @@ class ProtocolEngine:
                 or not 5 <= estimated_minutes <= 480
             ):
                 raise ProtocolExecutionError(f"Morning block {index} has an invalid duration")
+            if stated_capacity is not None and not _fits_stated_capacity(
+                block_energy, stated_capacity
+            ):
+                raise ProtocolExecutionError(
+                    f"Morning block {index} requires {block_energy.value} energy, "
+                    f"which exceeds the user's stated {stated_capacity.value} capacity"
+                )
             validated.append(
                 {
                     "title": title.strip(),

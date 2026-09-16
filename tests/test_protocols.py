@@ -2,12 +2,22 @@
 
 import json
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import func, select
 
 from neuro_os.agent import Agent, AgentContext, BaseTool, ToolCall, ToolResult
-from neuro_os.models import Protocol, ProtocolRun, ProtocolStepRun, ProtocolType, Task, User
+from neuro_os.models import (
+    DailyEnergyCheckIn,
+    EnergyLevel,
+    Protocol,
+    ProtocolRun,
+    ProtocolStepRun,
+    ProtocolType,
+    Task,
+    User,
+)
 from neuro_os.protocols import (
     ProtocolEngine,
     ProtocolExecutionError,
@@ -320,3 +330,25 @@ async def test_invalid_morning_output_records_failure_without_fabricated_tasks(s
     assert steps[-1].step_name == "sequence_blocks"
     assert steps[-1].error_category == "ProtocolExecutionError"
     assert "invalid JSON" in steps[-1].error_message
+
+
+@pytest.mark.asyncio
+async def test_morning_plan_cannot_exceed_the_users_stated_capacity(session):
+    user = await _create_user(session)
+    session.add(
+        DailyEnergyCheckIn(
+            user_id=user.id,
+            check_in_date=datetime.now(ZoneInfo(user.timezone)).date(),
+            energy_level=EnergyLevel.RECOVERY,
+        )
+    )
+    await session.commit()
+
+    engine = ProtocolEngine(session, None, lambda protocol_type: StepAgent())
+    with pytest.raises(ProtocolExecutionError, match="exceeds the user's stated recovery capacity"):
+        await engine.run_protocol(ProtocolType.MORNING, user.id)
+
+    run = (await session.execute(select(ProtocolRun))).scalar_one()
+    tasks = (await session.execute(select(Task))).scalars().all()
+    assert run.status == "failed"
+    assert tasks == []
