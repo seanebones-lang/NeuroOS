@@ -56,14 +56,14 @@ Not done yet:
 
 ## Quick start
 
-Requires **Python 3.12+**, **Docker**, and at least one model key in `.env`.
+Requires **Python 3.12+** and **Docker**. Set **`OPENAI_API_KEY`** in `.env` to run the currently implemented AI-backed protocols.
 
 ```bash
 git clone https://github.com/seanebones-lang/NeuroOS.git
 cd NeuroOS
 
 cp .env.example .env
-# Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY
+# Set OPENAI_API_KEY for AI-backed protocols
 # Change SECRET_KEY before anything but local play
 
 docker compose up -d --build
@@ -71,6 +71,10 @@ curl http://127.0.0.1:8011/health
 ```
 
 Compose maps the API to **8011** by default (`NEURO_OS_PORT` overrides). Docs: http://127.0.0.1:8011/docs
+
+The CLI, API, and worker share the OpenAI protocol agent. `ANTHROPIC_API_KEY` and
+`GOOGLE_API_KEY` are retained configuration fields; their protocol adapters are
+not implemented.
 
 ```bash
 docker compose exec api neuro-os register --email you@example.com
@@ -124,6 +128,10 @@ CORS_ORIGINS=https://app.example.com,https://admin.example.com
 OPENAI_API_KEY=replace-with-a-provider-key
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ```
+
+The production startup check currently accepts any of the three provider-key fields.
+AI-backed protocols still require `OPENAI_API_KEY`; passing the startup check does not
+verify that their provider can run.
 
 Redis limits registration and login by client IP within a 15-minute window, and limits authenticated
 protocol execution per user within an hour. Each limit is configurable with the `*_RATE_LIMIT`
@@ -180,7 +188,7 @@ tests/
 docker-compose.yml  Postgres, Redis, migrate, API, worker
 ```
 
-Stack: Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Postgres 16 + pgvector, Redis 7, Typer, OpenAI / Anthropic / Google.
+Stack: Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Postgres 16 + pgvector, Redis 7, Typer, OpenAI for current AI-backed protocols.
 
 ---
 
