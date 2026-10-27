@@ -1,6 +1,7 @@
 """Default morning-plan idempotency behavior."""
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -19,7 +20,7 @@ async def test_changed_capacity_creates_a_new_default_morning_key(session) -> No
     await session.flush()
     check_in = DailyEnergyCheckIn(
         user_id=user.id,
-        check_in_date=datetime.now().date(),
+        check_in_date=datetime.now(ZoneInfo(user.timezone)).date(),
         energy_level=EnergyLevel.RECOVERY,
         updated_at=datetime(2026, 9, 16, 8, tzinfo=UTC),
     )
